@@ -28,7 +28,7 @@ Decrypting works the same way: drop the `.vx2` file, enter the original passphra
 
 ## What's New in 2.0
 
-- **Zero File Size Limit**: Encrypt files of any size. The streaming engine removed the old 2 GB cap — terabyte-scale files work fine.
+- **Near-Zero File Size Limit**: Encrypt files of any size up to 4 PiB (the BE32 stream-counter limit). The streaming engine removed the old 2 GB cap — terabyte-scale files work fine. Files larger than 4 PiB are rejected with `FileTooLarge` to prevent silent counter wraparound.
 - **Constant ~258 MB RAM**: Argon2id key derivation uses 256 MB (fixed), and 1 MB chunk streaming adds ~2 MB. Peak stays at ~258 MB regardless of file size.
 - **High-Efficiency Batch Queue Processing**: Select multiple files, enter one passphrase, and the app processes them sequentially. If any file fails (disk full, permission denied), its temporary data is cleaned up and the queue moves to the next file — the app never crashes.
 - **VAULTX03 Streaming Engine**: AES-256-GCM-SIV with STREAM BE32 construction. Files are encrypted in 1 MB chunks with per-chunk authentication tags, keeping memory flat and guaranteeing integrity.

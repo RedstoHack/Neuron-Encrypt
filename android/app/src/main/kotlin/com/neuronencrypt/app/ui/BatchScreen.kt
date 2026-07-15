@@ -537,38 +537,70 @@ fun BatchScreen(onBack: () -> Unit) {
 
                     // Wipe successful files
                     var anyWiped by remember { mutableStateOf(false) }
+                    var wipeSummary by remember { mutableStateOf("") }
+                    var showBatchWipeDialog by remember { mutableStateOf(false) }
                     val successItems = done.items.filter { it.status == "Success" && !it.isWiped }
 
                     if (successItems.isNotEmpty() && !anyWiped) {
                         Button(
-                            onClick = {
-                                scope.launch {
-                                    for (item in successItems) {
-                                        try {
-                                            val deleted = DocumentsContract.deleteDocument(
-                                                context.contentResolver,
-                                                item.uri
-                                            )
-                                            if (deleted) {
-                                                item.isWiped = true
-                                            } else {
-                                                context.contentResolver.delete(item.uri, null, null)
-                                                item.isWiped = true
-                                            }
-                                        } catch (e: Exception) {
-                                            // ignore
-                                        }
-                                    }
-                                    anyWiped = true
-                                }
-                            },
+                            onClick = { showBatchWipeDialog = true },
                             colors = ButtonDefaults.buttonColors(containerColor = Error),
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("WIPE SUCCESSFUL SOURCE FILES", color = TextHi, fontFamily = JetBrainsMonoFamily)
+                            Text("WIPE ${successItems.size} SUCCESSFUL SOURCE FILE${if (successItems.size > 1) "S" else ""}",
+                                 color = TextHi, fontFamily = JetBrainsMonoFamily)
                         }
                         Spacer(modifier = Modifier.height(12.dp))
+
+                        if (showBatchWipeDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showBatchWipeDialog = false },
+                                title = { Text("Permanently delete ${successItems.size} file${if (successItems.size > 1) "s" else ""}?") },
+                                text = {
+                                    Text(
+                                        "This will permanently delete ${successItems.size} original file(s) from storage. " +
+                                        "This action CANNOT be undone.\n\n" +
+                                        "Make sure you can decrypt ALL the .vx2 files (remember the passphrases) before deleting the originals."
+                                    )
+                                },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showBatchWipeDialog = false
+                                            scope.launch {
+                                                var ok = 0
+                                                var fail = 0
+                                                for (item in successItems) {
+                                                    try {
+                                                        val deleted = DocumentsContract.deleteDocument(
+                                                            context.contentResolver,
+                                                            item.uri
+                                                        )
+                                                        if (deleted || context.contentResolver.delete(item.uri, null, null) > 0) {
+                                                            item.isWiped = true
+                                                            ok++
+                                                        } else {
+                                                            fail++
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        fail++
+                                                    }
+                                                }
+                                                wipeSummary = "Deleted: $ok" + if (fail > 0) ", failed: $fail" else ""
+                                                anyWiped = true
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Error)
+                                    ) { Text("DELETE ALL") }
+                                },
+                                dismissButton = {
+                                    OutlinedButton(onClick = { showBatchWipeDialog = false }) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            )
+                        }
                     } else if (anyWiped) {
                         Surface(
                             color = Success.copy(alpha = 0.08f),
@@ -578,7 +610,7 @@ fun BatchScreen(onBack: () -> Unit) {
                                 .border(1.dp, Success, RoundedCornerShape(8.dp))
                         ) {
                             Text(
-                                "Source files wiped successfully.",
+                                wipeSummary.ifBlank { "Source files wiped successfully." },
                                 color = Success,
                                 modifier = Modifier.padding(16.dp),
                                 textAlign = TextAlign.Center,

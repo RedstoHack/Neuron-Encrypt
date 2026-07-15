@@ -1,3 +1,15 @@
+/// Compare two byte slices in constant time **within a fixed input length**.
+///
+/// # ⚠️ Limitations
+/// - The loop iterates `max(a.len(), b.len())` times, which leaks the longer
+///   input's length through timing. Do NOT use this to compare a secret
+///   (e.g., HMAC tag, session token) against an attacker-controlled input.
+/// - For comparing a secret against untrusted input, use `subtle::ConstantTimeEq`
+///   from the RustCrypto `subtle` crate instead.
+///
+/// The current call sites only compare two user-typed passwords during the
+/// "confirm passphrase" prompt, where both inputs are user-supplied and the
+/// length leak is harmless.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     let len_a = a.len();
     let len_b = b.len();

@@ -57,6 +57,14 @@ pub const HEADER_V3_LEN: usize = 8 + SALT_V3_LEN + STREAM_NONCE_LEN;
 /// 1 MB chunks — balances memory usage vs per-chunk overhead.
 pub const CHUNK_SIZE: usize = 1_048_576;
 
+/// EncryptorBE32 uses a 4-byte (32-bit) counter, so the maximum number of
+/// intermediate chunks is 2^32. At 1 MiB per chunk, the maximum safe file
+/// size before counter wraparound is 2^32 * 1 MiB = 2^52 bytes = 4 PiB.
+/// Encrypting a file larger than this would cause counter wraparound,
+/// reusing (key, nonce, counter) triples and catastrophically breaking
+/// GCM-SIV confidentiality and integrity.
+pub const MAX_V3_FILE_SIZE: u64 = (1u64 << 32) * CHUNK_SIZE as u64;
+
 // ── V2 legacy limits (kept for backward-compat decryption) ──
 pub const MAX_FILE_SIZE: u64 = 8_000_000_000;
 pub const MAX_ENCRYPTED_FILE_SIZE: u64 = MAX_FILE_SIZE + HEADER_LEN as u64 + TAG_LEN as u64;
@@ -406,6 +414,14 @@ pub fn encrypt_file(
     let (mut file, source_metadata) = open_regular_file(src)?;
     let dest = validate_destination_path(src, dest, overwrite)?;
     let source_len = source_metadata.len();
+
+    // Guard against counter-wraparound in EncryptorBE32 (4-byte counter at 1 MiB chunks).
+    if source_len > MAX_V3_FILE_SIZE {
+        return Err(CryptoError::FileTooLarge {
+            size_gb: source_len as f64 / 1_000_000_000.0,
+            max_gb: MAX_V3_FILE_SIZE as f64 / 1_000_000_000.0,
+        });
+    }
 
     let mut salt = [0u8; SALT_V3_LEN];
     let mut stream_nonce = [0u8; STREAM_NONCE_LEN];
@@ -835,6 +851,16 @@ pub fn encrypt_stream<R: Read + Seek, W: Write>(
         return Err(CryptoError::PassphraseTooShort(MIN_PASSWORD_LEN));
     }
 
+    // Guard against counter-wraparound if the caller knows the size.
+    if let Some(size) = source_size {
+        if size > MAX_V3_FILE_SIZE {
+            return Err(CryptoError::FileTooLarge {
+                size_gb: size as f64 / 1_000_000_000.0,
+                max_gb: MAX_V3_FILE_SIZE as f64 / 1_000_000_000.0,
+            });
+        }
+    }
+
     let mut salt = [0u8; SALT_V3_LEN];
     let mut stream_nonce = [0u8; STREAM_NONCE_LEN];
     OsRng.fill_bytes(&mut salt);
@@ -1022,9 +1048,9 @@ fn decrypt_stream_v2<R: Read, W: Write>(
     const V2_STREAM_MAX_BYTES: u64 = 1_073_741_824;
     let mut ciphertext = Vec::new();
     reader
-        .take(V2_STREAM_MAX_BYTES)
+        .take(V2_STREAM_MAX_BYTES + 1)
         .read_to_end(&mut ciphertext)?;
-    if ciphertext.len() as u64 >= V2_STREAM_MAX_BYTES {
+    if ciphertext.len() as u64 > V2_STREAM_MAX_BYTES {
         return Err(CryptoError::LegacyFileTooLarge);
     }
 
@@ -1360,5 +1386,326 @@ mod tests {
         assert_eq!(fs::read(&dec_path).unwrap(), plaintext);
 
         let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    // ── P2-1 regression tests — edge cases, tamper, reorder, format-confusion ──
+
+    #[test]
+    fn test_v3_empty_file_roundtrip() {
+        // Encrypt a 0-byte file; should produce a 47-byte .vx2 (31 header + 16 tag)
+        // and decrypt back to a 0-byte file.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("empty.bin");
+        let enc = tmp_dir.join("empty.vx2");
+        let dec = tmp_dir.join("empty_dec.bin");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        assert_eq!(fs::metadata(&enc).unwrap().len(), 47);
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter).unwrap();
+        assert_eq!(fs::read(&dec).unwrap(), b"");
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_single_byte_roundtrip() {
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("one.bin");
+        let enc = tmp_dir.join("one.vx2");
+        let dec = tmp_dir.join("one_dec.bin");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"A").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter).unwrap();
+        assert_eq!(fs::read(&dec).unwrap(), b"A");
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_truncated_at_chunk_boundary_fails() {
+        // Truncating after the first chunk should make decrypt_last treat the
+        // first chunk as the last — flag mismatch → DecryptionFailed.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("big.bin");
+        let enc = tmp_dir.join("big.vx2");
+        let truncated = tmp_dir.join("trunc.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE * 2 + 100).collect();
+        fs::write(&src, &data).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+
+        // Truncate: keep 31-byte header + first chunk only (CHUNK_SIZE + TAG_LEN bytes)
+        let full = fs::read(&enc).unwrap();
+        let cut_len = HEADER_V3_LEN + CHUNK_SIZE + TAG_LEN;
+        assert!(full.len() > cut_len);
+        fs::write(&truncated, &full[..cut_len]).unwrap();
+
+        let dec = tmp_dir.join("dec.bin");
+        let result = decrypt_file(&truncated, &dec, false, password.as_bytes(), &reporter);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_tampered_salt_fails() {
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"sensitive data").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+
+        // Flip a bit in the salt (bytes 8..24)
+        let mut bytes = fs::read(&enc).unwrap();
+        bytes[8] ^= 0x01;
+        let tampered = tmp_dir.join("tampered.vx2");
+        fs::write(&tampered, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.txt");
+        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_tampered_nonce_fails() {
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"sensitive data").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+
+        // Flip a bit in the stream_nonce (bytes 24..31)
+        let mut bytes = fs::read(&enc).unwrap();
+        bytes[24] ^= 0x80;
+        let tampered = tmp_dir.join("tampered.vx2");
+        fs::write(&tampered, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.txt");
+        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_tampered_chunk_byte_fails() {
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"sensitive data here").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+
+        // Flip a bit in the body (after header)
+        let mut bytes = fs::read(&enc).unwrap();
+        let body_start = HEADER_V3_LEN;
+        assert!(bytes.len() > body_start + 4);
+        bytes[body_start + 4] ^= 0x10;
+        let tampered = tmp_dir.join("tampered.vx2");
+        fs::write(&tampered, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.txt");
+        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_magic_swap_v3_to_v2_fails() {
+        // Attacker rewrites VAULTX03 → VAULTX02. Dispatcher should route to V2 path,
+        // which fails because the V3 layout is incompatible with V2 expectations.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"sensitive data").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+
+        let mut bytes = fs::read(&enc).unwrap();
+        bytes[..8].copy_from_slice(MAGIC); // overwrite VAULTX03 with VAULTX02
+        let swapped = tmp_dir.join("swapped.vx2");
+        fs::write(&swapped, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.txt");
+        let result = decrypt_file(&swapped, &dec, false, password.as_bytes(), &reporter);
+        assert!(result.is_err());
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_reordered_chunks_fail() {
+        // Build a 3-chunk file, swap chunks 0 and 1, expect DecryptionFailed.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("big.bin");
+        let enc = tmp_dir.join("big.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE * 2 + CHUNK_SIZE / 2).collect();
+        fs::write(&src, &data).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+
+        let mut bytes = fs::read(&enc).unwrap();
+        let body = &mut bytes[HEADER_V3_LEN..];
+        let chunk_stride = CHUNK_SIZE + TAG_LEN;
+        assert!(body.len() >= 2 * chunk_stride);
+        // Swap chunks 0 and 1 (in place)
+        let mut buf = vec![0u8; chunk_stride];
+        buf.copy_from_slice(&body[..chunk_stride]);
+        body[..chunk_stride].copy_from_slice(&body[chunk_stride..2 * chunk_stride]);
+        body[chunk_stride..2 * chunk_stride].copy_from_slice(&buf);
+
+        let reordered = tmp_dir.join("reordered.vx2");
+        fs::write(&reordered, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.bin");
+        let result = decrypt_file(&reordered, &dec, false, password.as_bytes(), &reporter);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_extended_with_garbage_fails() {
+        // Appending bytes after the last chunk should promote the original last
+        // (sealed with encrypt_last, flag=1) to decrypt_next (flag=0) → fail.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"sensitive data here").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+
+        let mut bytes = fs::read(&enc).unwrap();
+        bytes.extend_from_slice(&[0xABu8; 64]);
+        let extended = tmp_dir.join("extended.vx2");
+        fs::write(&extended, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.txt");
+        let result = decrypt_file(&extended, &dec, false, password.as_bytes(), &reporter);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_password_length_boundary() {
+        // 7-byte password should be rejected; 8-byte should succeed.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let reporter = TestReporter;
+
+        fs::write(&src, b"data").unwrap();
+
+        let r1 = encrypt_file(&src, &enc, false, b"1234567", &reporter);
+        assert!(matches!(r1, Err(CryptoError::PassphraseTooShort(_))));
+
+        let r2 = encrypt_file(&src, &enc, false, b"12345678", &reporter);
+        assert!(r2.is_ok());
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_chunk_minus_one_roundtrip() {
+        // File of exactly CHUNK_SIZE - 1 bytes (just under one chunk).
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("under.bin");
+        let enc = tmp_dir.join("under.vx2");
+        let dec = tmp_dir.join("under_dec.bin");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE - 1).collect();
+        fs::write(&src, &data).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter).unwrap();
+        assert_eq!(fs::read(&dec).unwrap(), data);
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_chunk_plus_one_roundtrip() {
+        // File of exactly CHUNK_SIZE + 1 bytes (just over one chunk).
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("over.bin");
+        let enc = tmp_dir.join("over.vx2");
+        let dec = tmp_dir.join("over_dec.bin");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE + 1).collect();
+        fs::write(&src, &data).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter).unwrap();
+        assert_eq!(fs::read(&dec).unwrap(), data);
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v3_stream_decrypt_rejects_v2_magic_via_stream() {
+        // V2 file fed to decrypt_stream should route to decrypt_stream_v2,
+        // which we just exercise for a non-V2 body to confirm dispatch logic.
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        // Build a tiny "V2" file with garbage body (just to test dispatch)
+        let mut input = Vec::new();
+        input.extend_from_slice(MAGIC);
+        input.extend_from_slice(&[0u8; SALT_LEN]);
+        input.extend_from_slice(&[0u8; NONCE_LEN]);
+        input.extend_from_slice(&[0u8; TAG_LEN + 16]); // fake ciphertext+tag
+
+        let mut reader = std::io::Cursor::new(input);
+        let mut output = Vec::new();
+        let result = decrypt_stream(&mut reader, &mut output, password.as_bytes(), None, &reporter);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+    }
+
+    #[test]
+    fn test_v3_rejects_oversize_file_via_constant() {
+        // Sanity: MAX_V3_FILE_SIZE = 2^32 * 1MiB = 4 PiB. Just verify the constant.
+        assert_eq!(MAX_V3_FILE_SIZE, (1u64 << 32) * CHUNK_SIZE as u64);
+        // 4 PiB expressed in bytes:
+        assert_eq!(MAX_V3_FILE_SIZE, 1u64 << 52);
     }
 }

@@ -37,7 +37,9 @@ fn load_icon() -> eframe::egui::IconData {
 fn main() -> eframe::Result<()> {
     // Enable backtraces in debug builds so panics are never silent.
     #[cfg(debug_assertions)]
-    std::env::set_var("RUST_BACKTRACE", "1");
+    // SAFETY: this runs single-threaded before eframe::run_native spawns any
+    // thread, so there is no data race on the process environment.
+    unsafe { std::env::set_var("RUST_BACKTRACE", "1"); }
     let viewport = egui::ViewportBuilder::default()
         .with_title("Neuron Encrypt")
         .with_inner_size(egui::vec2(620.0, 540.0))

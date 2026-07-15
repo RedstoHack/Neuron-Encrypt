@@ -6,6 +6,8 @@
         android:theme="@style/Theme.NeuronEncrypt"
         android:icon="@drawable/ic_launcher"
         android:requestLegacyExternalStorage="false"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
         android:supportsRtl="true">
 
         <activity
@@ -19,6 +21,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- .vx2 file handling only — drop the broad application/octet-stream MIME
+                 filter so the app isn't offered as the default handler for arbitrary
+                 binary downloads. Users can still pick any file from inside the app. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.SEND" />

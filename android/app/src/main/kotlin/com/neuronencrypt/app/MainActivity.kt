@@ -2,6 +2,7 @@ package com.neuronencrypt.app
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +23,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Prune stale persisted URI permissions (Android caps at ~128).
+        pruneOldUriPermissions()
 
         // Parse intent on cold start
         sharedUriState.value = handleIntent(intent)
@@ -93,10 +97,40 @@ class MainActivity : ComponentActivity() {
         return when (intent.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> {
-                val streamUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                // Type-safe overload on API 33+; deprecated form on older APIs
+                // with try-catch for ClassCastException (attacker may send non-Uri Parcelable).
+                val streamUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    try {
+                        intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                    } catch (e: ClassCastException) {
+                        null
+                    }
+                }
                 streamUri ?: intent.data
             }
             else -> null
+        }
+    }
+
+    /// Release persisted URI permissions beyond a sane cap so we don't hit
+    /// Android's ~128-permission limit after many file selections.
+    private fun pruneOldUriPermissions(keepCount: Int = 16) {
+        try {
+            val perms = contentResolver.persistedUriPermissions
+            if (perms.size > keepCount) {
+                perms.drop(keepCount).forEach { p ->
+                    try {
+                        contentResolver.releasePersistableUriPermission(p.uri, p.persistedFlags)
+                    } catch (_: SecurityException) {
+                        // Permission may already be released
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Best-effort cleanup
         }
     }
 }

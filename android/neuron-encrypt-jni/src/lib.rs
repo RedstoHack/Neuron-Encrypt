@@ -41,7 +41,7 @@ impl Read for CancelableReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.is_cancelled() {
             return Err(io::Error::new(
-                io::ErrorKind::Other,
+                io::ErrorKind::Interrupted,
                 CANCELLED_IO_MESSAGE,
             ));
         }
@@ -53,7 +53,7 @@ impl Seek for CancelableReader {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         if self.is_cancelled() {
             return Err(io::Error::new(
-                io::ErrorKind::Other,
+                io::ErrorKind::Interrupted,
                 CANCELLED_IO_MESSAGE,
             ));
         }
@@ -87,7 +87,7 @@ impl ProgressReporter for JniReporter {
 
 fn map_error(env: &mut JNIEnv, err: CryptoError) -> jint {
     let (code, message) = match err {
-        CryptoError::Io(ref io_err) if io_err.to_string() == CANCELLED_IO_MESSAGE => {
+        CryptoError::Io(ref io_err) if io_err.kind() == io::ErrorKind::Interrupted => {
             (1, "Cancelled".to_owned())
         }
         CryptoError::DecryptionFailed
@@ -152,6 +152,11 @@ fn native_encrypt_impl(
         return fail_with_exception(env, password, 2, "Invalid file descriptor.");
     }
 
+    // Wrap fds FIRST so they're owned by File and closed on any early return.
+    // CryptoService.kt calls detachFd() before this JNI call, so we own the fds now.
+    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
+    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
+
     let vm = match env.get_java_vm() {
         Ok(v) => v,
         Err(_) => return fail_with_exception(env, password, 1, "Failed to access JVM."),
@@ -176,9 +181,6 @@ fn native_encrypt_impl(
         Err(_) => return fail_with_exception(env, password, 2, "Failed to read passphrase."),
     };
     let password_bytes = Zeroizing::new(password_bytes);
-
-    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
-    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
 
     let vm = Arc::new(vm);
     let mut reader = CancelableReader {
@@ -228,6 +230,10 @@ fn native_decrypt_impl(
         return fail_with_exception(env, password, 2, "Invalid file descriptor.");
     }
 
+    // Wrap fds FIRST — see native_encrypt_impl for the rationale.
+    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
+    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
+
     let vm = match env.get_java_vm() {
         Ok(v) => v,
         Err(_) => return fail_with_exception(env, password, 1, "Failed to access JVM."),
@@ -252,9 +258,6 @@ fn native_decrypt_impl(
         Err(_) => return fail_with_exception(env, password, 2, "Failed to read passphrase."),
     };
     let password_bytes = Zeroizing::new(password_bytes);
-
-    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
-    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
 
     let vm = Arc::new(vm);
     let mut reader = CancelableReader {

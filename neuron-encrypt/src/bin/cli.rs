@@ -106,17 +106,18 @@ enum Command {
     },
 }
 
-fn read_password(password_file: &Option<PathBuf>) -> Result<Zeroizing<String>, (ExitCode, String)> {
+fn read_password(password_file: &Option<PathBuf>) -> Result<Zeroizing<Vec<u8>>, (ExitCode, String)> {
     if let Some(path) = password_file {
-        let bytes = fs::read(path).map_err(|e| {
+        // Wrap in Zeroizing immediately so even on UTF-8 failure the bytes are zeroed.
+        // Returns Vec<u8> (not String) to support binary key files.
+        let mut bytes = Zeroizing::new(fs::read(path).map_err(|e| {
             (ExitCode::BadInput, format!("Cannot read password file: {e}"))
-        })?;
-        let mut pw = Zeroizing::new(String::from_utf8(bytes).map_err(|e| {
-            (ExitCode::BadInput, format!("Password file contains invalid UTF-8: {e}"))
         })?);
-        let trimmed_len = pw.trim_end_matches(&['\r', '\n'][..]).len();
-        pw.truncate(trimmed_len);
-        return Ok(pw);
+        // Strip trailing \r\n
+        while matches!(bytes.last(), Some(b'\n') | Some(b'\r')) {
+            bytes.pop();
+        }
+        return Ok(bytes);
     }
 
     if let Ok(pw) = std::env::var("NEURON_PASSWORD") {
@@ -126,7 +127,7 @@ fn read_password(password_file: &Option<PathBuf>) -> Result<Zeroizing<String>, (
         eprintln!(
             "[WARN] Prefer --password-file with a 0600-permission file for sensitive use."
         );
-        return Ok(Zeroizing::new(pw));
+        return Ok(Zeroizing::new(pw.into_bytes()));
     }
 
     loop {
@@ -136,7 +137,7 @@ fn read_password(password_file: &Option<PathBuf>) -> Result<Zeroizing<String>, (
                     eprintln!("Error: Passphrase cannot be empty.");
                     continue;
                 }
-                return Ok(Zeroizing::new(pw));
+                return Ok(Zeroizing::new(pw.into_bytes()));
             }
             Err(e) => {
                 return Err((ExitCode::BadInput, format!("Error reading passphrase: {e}")));
@@ -146,7 +147,7 @@ fn read_password(password_file: &Option<PathBuf>) -> Result<Zeroizing<String>, (
 }
 
 
-fn read_password_confirmed(password_file: &Option<PathBuf>) -> Result<Zeroizing<String>, (ExitCode, String)> {
+fn read_password_confirmed(password_file: &Option<PathBuf>) -> Result<Zeroizing<Vec<u8>>, (ExitCode, String)> {
     let pass1 = read_password(password_file)?;
     let pass2 = loop {
         match rpassword::prompt_password("Confirm passphrase: ") {
@@ -155,12 +156,12 @@ fn read_password_confirmed(password_file: &Option<PathBuf>) -> Result<Zeroizing<
                     eprintln!("Error: Passphrase cannot be empty.");
                     continue;
                 }
-                break Zeroizing::new(pw);
+                break Zeroizing::new(pw.into_bytes());
             }
             Err(e) => return Err((ExitCode::BadInput, format!("Error reading passphrase: {e}"))),
         }
     };
-    if !constant_time_eq(pass1.as_bytes(), pass2.as_bytes()) {
+    if !constant_time_eq(pass1.as_slice(), pass2.as_slice()) {
         return Err((ExitCode::BadInput, "Passphrases do not match".to_owned()));
     }
     Ok(pass1)
@@ -414,7 +415,7 @@ fn run() -> Result<(), ExitCode> {
 
     if password.len() < crypto::MIN_PASSWORD_LEN {
         let msg = format!(
-            "Passphrase too short (minimum {} characters).",
+            "Passphrase too short (minimum {} bytes).",
             crypto::MIN_PASSWORD_LEN
         );
         if cli.json {
@@ -522,7 +523,7 @@ fn run() -> Result<(), ExitCode> {
                 &input_path,
                 &output_path,
                 cli.force,
-                password.as_bytes(),
+                password.as_slice(),
                 &throttled,
             )
         } else {
@@ -530,7 +531,7 @@ fn run() -> Result<(), ExitCode> {
                 &input_path,
                 &output_path,
                 cli.force,
-                password.as_bytes(),
+                password.as_slice(),
                 &throttled,
             )
         };
@@ -687,7 +688,7 @@ fn run() -> Result<(), ExitCode> {
                 crypto::encrypt_stream(
                     &mut f,
                     &mut stdout_lock,
-                    password.as_bytes(),
+                    password.as_slice(),
                     source_size,
                     &throttled,
                 )
@@ -726,7 +727,7 @@ fn run() -> Result<(), ExitCode> {
                 crypto::decrypt_stream(
                     &mut reader,
                     &mut stdout_lock,
-                    password.as_bytes(),
+                    password.as_slice(),
                     source_size,
                     &throttled,
                 )
@@ -752,7 +753,7 @@ fn run() -> Result<(), ExitCode> {
                 crypto::decrypt_stream(
                     &mut reader,
                     &mut out,
-                    password.as_bytes(),
+                    password.as_slice(),
                     source_size,
                     &throttled,
                 )

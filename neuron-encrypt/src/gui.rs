@@ -460,12 +460,6 @@ impl NeuronEncryptApp {
             let reporter = MpscReporter { tx: tx.clone() };
             let throttled_reporter = ThrottledReporter::new(&reporter);
 
-            let hash_source = if mode == Mode::Encrypt {
-                compute_sha256(&file_path)
-            } else {
-                None
-            };
-
             let result = if mode == Mode::Encrypt {
                 crypto::encrypt_file(&file_path, &dest, false, password.as_bytes(), &throttled_reporter)
             } else {
@@ -474,11 +468,9 @@ impl NeuronEncryptApp {
 
             match result {
                 Ok(_) => {
-                    let hash = if mode == Mode::Decrypt {
-                        compute_sha256(&dest)
-                    } else {
-                        hash_source
-                    };
+                    // P2-4: always hash the OUTPUT file (ciphertext on encrypt, plaintext on decrypt).
+                    // Avoids leaking a plaintext-hash verifier via screenshots.
+                    let hash = compute_sha256(&dest);
                     let _ = tx.try_send(GuiMsg::Done("Operation complete.".to_owned(), hash));
                 }
                 Err(e) => {
@@ -581,6 +573,17 @@ impl NeuronEncryptApp {
                 }
                 let reporter = FnReporter(file_reporter);
                 let throttled = ThrottledReporter::new(&reporter);
+
+                // P1-4: skip already-encrypted .vx2 files in batch encrypt mode to avoid
+                // silent double-encryption producing .vx2.vx2 outputs.
+                if mode == Mode::Encrypt && is_vx2_file(src) {
+                    let _ = tx.try_send(GuiMsg::BatchFileError(
+                        idx,
+                        "Skipped: file already has .vx2 extension. Untick 'Encrypt' or remove the file.".to_string(),
+                    ));
+                    ctx_clone.request_repaint();
+                    continue;
+                }
 
                 let result = if mode == Mode::Encrypt {
                     crypto::encrypt_file(src, &dest, false, password.as_bytes(), &throttled)
@@ -1765,7 +1768,14 @@ impl eframe::App for NeuronEncryptApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
         if let Some(path) = dropped_files.first().and_then(|file| file.path.clone()) {
-            self.set_selected_file(path);
+            // P1-3: ignore drops while an operation is in progress; the background
+            // thread is still writing the original output and accepting a new file
+            // mid-flight would corrupt the on-screen state (old dest shown with new
+            // selected_file). Queueing would be nicer, but simply ignoring is safe.
+            let busy = matches!(self.flow, AppFlow::Processing | AppFlow::BatchProcessing);
+            if !busy {
+                self.set_selected_file(path);
+            }
         }
 
         loop {

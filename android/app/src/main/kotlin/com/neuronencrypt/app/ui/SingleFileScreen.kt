@@ -504,30 +504,10 @@ fun SingleFileScreen(
                     Spacer(modifier = Modifier.height(32.dp))
 
                     if (!success.isWiped) {
+                        var showWipeDialog by remember { mutableStateOf(false) }
+
                         Button(
-                            onClick = {
-                                try {
-                                    val deleted = android.provider.DocumentsContract.deleteDocument(
-                                        context.contentResolver,
-                                        inputUri!!
-                                    )
-                                    if (deleted) {
-                                        status = success.copy(isWiped = true)
-                                    } else {
-                                        // Try standard content resolver delete
-                                        val rows = context.contentResolver.delete(inputUri!!, null, null)
-                                        if (rows > 0) {
-                                            status = success.copy(isWiped = true)
-                                        } else {
-                                            scope.launch {
-                                                status = ProcessStatus.Error("Storage provider denied deletion request.")
-                                            }
-                                        }
-                                    }
-                                } catch (e: Exception) {
-                                    status = ProcessStatus.Error("Delete failed: ${e.message}")
-                                }
-                            },
+                            onClick = { showWipeDialog = true },
                             colors = ButtonDefaults.buttonColors(containerColor = Error),
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp)
@@ -535,6 +515,53 @@ fun SingleFileScreen(
                             Text("WIPE SOURCE FILE", color = TextHi, fontFamily = JetBrainsMonoFamily)
                         }
                         Spacer(modifier = Modifier.height(12.dp))
+
+                        if (showWipeDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showWipeDialog = false },
+                                title = { Text("Permanently delete original?") },
+                                text = {
+                                    Text(
+                                        "This will permanently delete the original file from storage. " +
+                                        "This action CANNOT be undone.\n\n" +
+                                        "Make sure you can decrypt the .vx2 file (e.g., remember the passphrase) before deleting the original."
+                                    )
+                                },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showWipeDialog = false
+                                            try {
+                                                val deleted = android.provider.DocumentsContract.deleteDocument(
+                                                    context.contentResolver,
+                                                    inputUri!!
+                                                )
+                                                if (deleted) {
+                                                    status = success.copy(isWiped = true)
+                                                } else {
+                                                    val rows = context.contentResolver.delete(inputUri!!, null, null)
+                                                    if (rows > 0) {
+                                                        status = success.copy(isWiped = true)
+                                                    } else {
+                                                        scope.launch {
+                                                            status = ProcessStatus.Error("Storage provider denied deletion request.")
+                                                        }
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                status = ProcessStatus.Error("Delete failed: ${e.message}")
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Error)
+                                    ) { Text("DELETE PERMANENTLY") }
+                                },
+                                dismissButton = {
+                                    OutlinedButton(onClick = { showWipeDialog = false }) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            )
+                        }
                     } else {
                         Surface(
                             color = Success.copy(alpha = 0.08f),
