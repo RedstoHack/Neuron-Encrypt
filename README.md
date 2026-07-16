@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Neuron Encrypt](https://img.shields.io/badge/Neuron%20Encrypt-v2.0.0-blue?style=for-the-badge&logo=rust)
+![Neuron Encrypt](https://img.shields.io/badge/Neuron%20Encrypt-v2.1.0-blue?style=for-the-badge&logo=rust)
 ![License](https://img.shields.io/badge/License-GPLv3-green?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=for-the-badge)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=for-the-badge&logo=rust)
@@ -22,13 +22,32 @@ AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
 Neuron Encrypt is a lightweight desktop file encryption tool built in Rust with a minimal dark-themed GUI. Drag a file in, enter a passphrase, and get an encrypted `.vx2` output. Your original file is never modified. Nothing leaves your machine.
 
-Decrypting works the same way: drop the `.vx2` file, enter the original passphrase, and get your file back. Neuron Encrypt 2.0 automatically detects whether a file uses the legacy VAULTX02 format or the current VAULTX03 streaming format — no manual switching required.
+Decrypting works the same way: drop the `.vx2` file, enter the original passphrase, and get your file back. Neuron Encrypt 2.1 automatically detects whether a file uses the legacy VAULTX02 format, the VAULTX03 streaming format, or the current VAULTX04 AAD-authenticated streaming format — no manual switching required.
+
+---
+
+## What's New in 2.1
+
+- **VAULTX04 format with header AAD**: New encryptions now authenticate the full header (magic || salt || stream_nonce) as Additional Authenticated Data on every chunk. Closes the defensive-in-depth gap from the security audit (V3 did not authenticate the header at the AEAD layer). V3 and V2 files remain fully readable for backward compatibility.
+- **GUI Cancel button**: Single-file and batch operations can now be aborted mid-operation. The Cancel button polls a flag at every 1 MB chunk boundary (~50 ms latency), cleans up the `.tmp` file, and returns a calm "Operation cancelled" message instead of a scary red error.
+- **WIPE SOURCE FILE confirmation dialogs**: Both single-file and batch WIPE buttons now require an explicit "Delete permanently" confirmation. Previously a single misclick permanently deleted the original plaintext.
+- **JNI file-descriptor leak fix**: Raw file descriptors from Android's `ParcelFileDescriptor.detachFd()` are now wrapped in `File::from_raw_fd` immediately, so any failure in subsequent JNI setup drops the File and closes the fd instead of leaking it.
+- **Binary password files**: `--password-file` now accepts arbitrary bytes (not just UTF-8). The buffer is wrapped in `Zeroizing<Vec<u8>>` from the start, so even on UTF-8 failure the bytes are zeroed before being freed.
+- **Type-safe ParcelFileDescriptor handling**: `MainActivity.getParcelableExtra` now uses the API 33+ typed overload with a `ClassCastException` fallback for older Android versions, preventing crashes from attacker apps sending non-Uri Parcelables.
+- **4 PiB file size limit enforced**: The EncryptorBE32 32-bit counter limits V3/V4 files to 2^32 × 1 MiB = 4 PiB. Encryption now explicitly rejects larger files with `FileTooLarge` instead of silently wrapping the counter (which would cause catastrophic GCM-SIV nonce reuse).
+- **V2 stream-decrypt 1 GiB limit fixed**: Previously a 1 GiB V2 file decrypted via `decrypt -i f.vx2` but failed via `cat f.vx2 | decrypt -i -`. Both paths now use the same `take(limit+1)` + `>` comparison.
+- **AndroidManifest hardening**: `allowBackup=false`, `fullBackupContent=false`.
+- **URI permission pruning**: Stale persisted URI permissions are released at startup so the ~128-permission cap is never hit.
+- **Android CI now lints + tests the JNI crate**: clippy, rustfmt, cargo test, and cargo audit run on both the core and JNI crates before the APK build.
+- **13 + 9 = 22 new tests**: V3 edge cases (empty file, single byte, chunk boundaries, truncation, tampered salt/nonce/chunk, magic-swap, reorder, extension) and V4 tests (roundtrip, AAD tamper detection, magic swap, empty file, wrong password, pipe roundtrip). Total: 38 tests, all passing.
+
+See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for the full audit report and [CHANGELOG.md](CHANGELOG.md) for a complete change history.
 
 ---
 
 ## What's New in 2.0
 
-- **Zero File Size Limit**: Encrypt files of any size. The streaming engine removed the old 2 GB cap — terabyte-scale files work fine.
+- **Near-Zero File Size Limit**: Encrypt files of any size up to 4 PiB (the BE32 stream-counter limit). The streaming engine removed the old 2 GB cap — terabyte-scale files work fine. Files larger than 4 PiB are rejected with `FileTooLarge` to prevent silent counter wraparound.
 - **Constant ~258 MB RAM**: Argon2id key derivation uses 256 MB (fixed), and 1 MB chunk streaming adds ~2 MB. Peak stays at ~258 MB regardless of file size.
 - **High-Efficiency Batch Queue Processing**: Select multiple files, enter one passphrase, and the app processes them sequentially. If any file fails (disk full, permission denied), its temporary data is cleaned up and the queue moves to the next file — the app never crashes.
 - **VAULTX03 Streaming Engine**: AES-256-GCM-SIV with STREAM BE32 construction. Files are encrypted in 1 MB chunks with per-chunk authentication tags, keeping memory flat and guaranteeing integrity.

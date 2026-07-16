@@ -4,9 +4,9 @@ use std::os::fd::{FromRawFd, RawFd};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 
-use jni::JNIEnv;
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject};
 use jni::sys::{jint, jlong};
+use jni::JNIEnv;
 use jni::JavaVM;
 
 use neuron_encrypt_core::crypto::{
@@ -41,7 +41,7 @@ impl Read for CancelableReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.is_cancelled() {
             return Err(io::Error::new(
-                io::ErrorKind::Other,
+                io::ErrorKind::Interrupted,
                 CANCELLED_IO_MESSAGE,
             ));
         }
@@ -53,7 +53,7 @@ impl Seek for CancelableReader {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         if self.is_cancelled() {
             return Err(io::Error::new(
-                io::ErrorKind::Other,
+                io::ErrorKind::Interrupted,
                 CANCELLED_IO_MESSAGE,
             ));
         }
@@ -87,7 +87,7 @@ impl ProgressReporter for JniReporter {
 
 fn map_error(env: &mut JNIEnv, err: CryptoError) -> jint {
     let (code, message) = match err {
-        CryptoError::Io(ref io_err) if io_err.to_string() == CANCELLED_IO_MESSAGE => {
+        CryptoError::Io(ref io_err) if io_err.kind() == io::ErrorKind::Interrupted => {
             (1, "Cancelled".to_owned())
         }
         CryptoError::DecryptionFailed
@@ -113,6 +113,7 @@ fn map_error(env: &mut JNIEnv, err: CryptoError) -> jint {
         CryptoError::Argon2Failed(_)
         | CryptoError::HkdfFailed(_)
         | CryptoError::EncryptionFailed(_) => (1, "Cryptographic operation failed.".to_owned()),
+        CryptoError::Cancelled => (1, "Cancelled".to_owned()),
     };
 
     let _ = env.throw_new(EXCEPTION_CLASS, message);
@@ -128,12 +129,7 @@ fn zero_java_array(env: &mut JNIEnv, array: &JByteArray) {
     }
 }
 
-fn fail_with_exception(
-    env: &mut JNIEnv,
-    password: &JByteArray,
-    code: jint,
-    message: &str,
-) -> jint {
+fn fail_with_exception(env: &mut JNIEnv, password: &JByteArray, code: jint, message: &str) -> jint {
     zero_java_array(env, password);
     let _ = env.throw_new(EXCEPTION_CLASS, message);
     code
@@ -151,6 +147,11 @@ fn native_encrypt_impl(
     if input_fd < 0 || output_fd < 0 {
         return fail_with_exception(env, password, 2, "Invalid file descriptor.");
     }
+
+    // Wrap fds FIRST so they're owned by File and closed on any early return.
+    // CryptoService.kt calls detachFd() before this JNI call, so we own the fds now.
+    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
+    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
 
     let vm = match env.get_java_vm() {
         Ok(v) => v,
@@ -176,9 +177,6 @@ fn native_encrypt_impl(
         Err(_) => return fail_with_exception(env, password, 2, "Failed to read passphrase."),
     };
     let password_bytes = Zeroizing::new(password_bytes);
-
-    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
-    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
 
     let vm = Arc::new(vm);
     let mut reader = CancelableReader {
@@ -228,6 +226,10 @@ fn native_decrypt_impl(
         return fail_with_exception(env, password, 2, "Invalid file descriptor.");
     }
 
+    // Wrap fds FIRST — see native_encrypt_impl for the rationale.
+    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
+    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
+
     let vm = match env.get_java_vm() {
         Ok(v) => v,
         Err(_) => return fail_with_exception(env, password, 1, "Failed to access JVM."),
@@ -252,9 +254,6 @@ fn native_decrypt_impl(
         Err(_) => return fail_with_exception(env, password, 2, "Failed to read passphrase."),
     };
     let password_bytes = Zeroizing::new(password_bytes);
-
-    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
-    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
 
     let vm = Arc::new(vm);
     let mut reader = CancelableReader {
@@ -291,6 +290,27 @@ fn native_decrypt_impl(
     }
 }
 
+/// JNI entry point for `NeuronEncryptNative.nativeEncrypt`.
+///
+/// # Safety
+///
+/// This function is `unsafe extern "system"` because it is called by the JVM
+/// via the Java Native Interface. The caller (the JVM) must:
+///
+/// - Pass valid `input_fd` and `output_fd` values that refer to open OS file
+///   descriptors. The function takes ownership of these fds (via
+///   `File::from_raw_fd`) and will close them on return — the Java side must
+///   have called `ParcelFileDescriptor.detachFd()` to release its ownership
+///   before invoking this function.
+/// - Pass a non-null `password: JByteArray` reference owned by the current
+///   JNI frame. The function reads its contents and zeroes the array in-place
+///   before returning.
+/// - Pass non-null `progress_listener` and `cancel_flag` references that
+///   implement `ProgressListener.onProgress(float, String)` and
+///   `AtomicBoolean.get(): boolean` respectively.
+///
+/// Violating any of these may cause undefined behavior (use-after-free,
+/// null-pointer dereference, or closing of unrelated fds).
 #[no_mangle]
 pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nativeEncrypt(
     mut env: JNIEnv,
@@ -324,6 +344,13 @@ pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nat
     }
 }
 
+/// JNI entry point for `NeuronEncryptNative.nativeDecrypt`.
+///
+/// # Safety
+///
+/// Same safety contract as `Java_com_neuronencrypt_app_NeuronEncryptNative_nativeEncrypt`.
+/// See that function's safety doc for the full requirements on `input_fd`,
+/// `output_fd`, `password`, `progress_listener`, and `cancel_flag`.
 #[no_mangle]
 pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nativeDecrypt(
     mut env: JNIEnv,
