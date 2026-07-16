@@ -161,7 +161,6 @@ pub struct NeuronEncryptApp {
     cancel_flag: Arc<AtomicBool>,
 }
 
-
 fn truncate_chars(s: &str, n: usize) -> String {
     let mut out = s.chars().take(n).collect::<String>();
     if s.chars().count() > n {
@@ -173,7 +172,6 @@ fn truncate_chars(s: &str, n: usize) -> String {
 fn sanitize_text(s: &str) -> String {
     s.trim().to_owned()
 }
-
 
 fn strength_color(strength: Strength) -> Color32 {
     match strength {
@@ -410,7 +408,9 @@ impl NeuronEncryptApp {
             return;
         }
 
-        if self.mode == Mode::Encrypt && !constant_time_eq(self.password.as_bytes(), self.confirm_password.as_bytes()) {
+        if self.mode == Mode::Encrypt
+            && !constant_time_eq(self.password.as_bytes(), self.confirm_password.as_bytes())
+        {
             self.status = Some("Passphrases do not match.".to_owned());
             return;
         }
@@ -520,7 +520,9 @@ impl NeuronEncryptApp {
             ));
             return;
         }
-        if self.mode == Mode::Encrypt && !constant_time_eq(self.password.as_bytes(), self.confirm_password.as_bytes()) {
+        if self.mode == Mode::Encrypt
+            && !constant_time_eq(self.password.as_bytes(), self.confirm_password.as_bytes())
+        {
             self.status = Some("Passphrases do not match.".to_owned());
             return;
         }
@@ -610,9 +612,23 @@ impl NeuronEncryptApp {
                 }
 
                 let result = if mode == Mode::Encrypt {
-                    crypto::encrypt_file(src, &dest, false, password.as_bytes(), &throttled, Some(&cancel))
+                    crypto::encrypt_file(
+                        src,
+                        &dest,
+                        false,
+                        password.as_bytes(),
+                        &throttled,
+                        Some(&cancel),
+                    )
                 } else {
-                    crypto::decrypt_file(src, &dest, false, password.as_bytes(), &throttled, Some(&cancel))
+                    crypto::decrypt_file(
+                        src,
+                        &dest,
+                        false,
+                        password.as_bytes(),
+                        &throttled,
+                        Some(&cancel),
+                    )
                 };
 
                 match result {
@@ -674,7 +690,7 @@ impl NeuronEncryptApp {
                 Pos2::new(rect.min.x, rect.max.y - 1.0),
                 Pos2::new(rect.max.x, rect.max.y - 1.0),
             ],
-            Stroke::new(1.0, Palette::BORDER),
+            Stroke::new(1.0_f32, Palette::BORDER),
         );
 
         painter.rect_filled(
@@ -739,7 +755,7 @@ impl NeuronEncryptApp {
             painter.rect_stroke(
                 button_rect,
                 7.0,
-                Stroke::new(1.0, stroke_color),
+                Stroke::new(1.0_f32, stroke_color),
                 egui::StrokeKind::Outside,
             );
             painter.text(
@@ -767,7 +783,7 @@ impl NeuronEncryptApp {
         let (badge, fill, text_color) = self.screen_badge();
         egui::Frame::new()
             .fill(fill)
-            .stroke(Stroke::new(1.0, Palette::BORDER_MED))
+            .stroke(Stroke::new(1.0_f32, Palette::BORDER_MED))
             .corner_radius(rounding)
             .inner_margin(6.0)
             .show(ui, |ui| {
@@ -826,7 +842,12 @@ impl NeuronEncryptApp {
         };
 
         painter.rect_filled(rect, 8.0, fill);
-        painter.rect_stroke(rect, 8.0, Stroke::new(1.0, stroke_color), egui::StrokeKind::Outside);
+        painter.rect_stroke(
+            rect,
+            8.0,
+            Stroke::new(1.0_f32, stroke_color),
+            egui::StrokeKind::Outside,
+        );
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
@@ -863,7 +884,7 @@ impl NeuronEncryptApp {
             rect,
             12.0,
             Stroke::new(
-                1.0,
+            1.0_f32,
                 if hover_drop {
                     Palette::ACCENT
                 } else {
@@ -953,7 +974,7 @@ impl NeuronEncryptApp {
 
         egui::Frame::new()
             .fill(Palette::SURFACE_1)
-            .stroke(Stroke::new(1.0, Palette::BORDER))
+            .stroke(Stroke::new(1.0_f32, Palette::BORDER))
             .corner_radius(10.0)
             .inner_margin(14.0)
             .show(ui, |ui| {
@@ -999,7 +1020,7 @@ impl NeuronEncryptApp {
                     ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
                 ui.painter_at(divider).line_segment(
                     [divider.left_center(), divider.right_center()],
-                    Stroke::new(1.0, Palette::BORDER_SUBTLE),
+                    Stroke::new(1.0_f32, Palette::BORDER_SUBTLE),
                 );
                 ui.add_space(12.0);
 
@@ -1058,7 +1079,7 @@ impl NeuronEncryptApp {
             rect,
             8.0,
             Stroke::new(
-                1.0,
+            1.0_f32,
                 if focus {
                     Palette::BORDER_FOCUS
                 } else {
@@ -1139,7 +1160,7 @@ impl NeuronEncryptApp {
     ) {
         egui::Frame::new()
             .fill(fill)
-            .stroke(Stroke::new(1.0, border))
+            .stroke(Stroke::new(1.0_f32, border))
             .corner_radius(8.0)
             .inner_margin(12.0)
             .show(ui, |ui| {
@@ -1206,7 +1227,7 @@ impl NeuronEncryptApp {
             ui.add_space(14.0);
             egui::Frame::new()
                 .fill(Palette::warning_muted())
-                .stroke(Stroke::new(1.0, Palette::WARNING))
+                .stroke(Stroke::new(1.0_f32, Palette::WARNING))
                 .corner_radius(8.0)
                 .inner_margin(12.0)
                 .show(ui, |ui| {
@@ -1361,7 +1382,7 @@ impl NeuronEncryptApp {
 
         egui::Frame::new()
             .fill(Palette::SURFACE_1)
-            .stroke(Stroke::new(1.0, Palette::BORDER))
+            .stroke(Stroke::new(1.0_f32, Palette::BORDER))
             .corner_radius(8.0)
             .inner_margin(12.0)
             .show(ui, |ui| {
@@ -1391,7 +1412,7 @@ impl NeuronEncryptApp {
                     .color(Palette::TEXT_HI),
             )
             .fill(Palette::SURFACE_2)
-            .stroke(Stroke::new(1.0, Palette::BORDER))
+            .stroke(Stroke::new(1.0_f32, Palette::BORDER))
             .corner_radius(6.0)
             .min_size(egui::vec2(140.0, 32.0));
 
@@ -1403,11 +1424,9 @@ impl NeuronEncryptApp {
 
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(
-                "Cancel takes effect after the current 1 MB chunk completes.",
-            )
-            .font(FontId::new(10.5, FontFamily::Monospace))
-            .color(Palette::TEXT_LO),
+            egui::RichText::new("Cancel takes effect after the current 1 MB chunk completes.")
+                .font(FontId::new(10.5, FontFamily::Monospace))
+                .color(Palette::TEXT_LO),
         );
     }
 
@@ -1423,7 +1442,7 @@ impl NeuronEncryptApp {
             };
             let stroke = if ok { Palette::SUCCESS } else { Palette::ERROR };
             painter.circle_filled(icon_rect.center(), 30.0, fill);
-            painter.circle_stroke(icon_rect.center(), 30.0, Stroke::new(2.0, stroke));
+            painter.circle_stroke(icon_rect.center(), 30.0_f32, Stroke::new(2.0_f32, stroke));
 
             if ok {
                 self.check_anim = (self.check_anim + 0.07).min(1.0);
@@ -1432,7 +1451,7 @@ impl NeuronEncryptApp {
                 let c = Pos2::new(icon_rect.min.x + 61.0, icon_rect.min.y + 28.0);
                 painter.add(Shape::line(
                     vec![a, b, c],
-                    Stroke::new(2.5, Palette::SUCCESS),
+                    Stroke::new(2.5_f32, Palette::SUCCESS),
                 ));
             } else {
                 painter.line_segment(
@@ -1440,14 +1459,14 @@ impl NeuronEncryptApp {
                         icon_rect.center() + vec2(-13.0, -13.0),
                         icon_rect.center() + vec2(13.0, 13.0),
                     ],
-                    Stroke::new(2.5, Palette::ERROR),
+                    Stroke::new(2.5_f32, Palette::ERROR),
                 );
                 painter.line_segment(
                     [
                         icon_rect.center() + vec2(13.0, -13.0),
                         icon_rect.center() + vec2(-13.0, 13.0),
                     ],
-                    Stroke::new(2.5, Palette::ERROR),
+                    Stroke::new(2.5_f32, Palette::ERROR),
                 );
             }
         });
@@ -1921,7 +1940,7 @@ impl eframe::App for NeuronEncryptApp {
                     ui.vertical_centered(|ui| {
                         egui::Frame::new()
                             .fill(Palette::SURFACE)
-                            .stroke(Stroke::new(1.0, Palette::BORDER))
+                            .stroke(Stroke::new(1.0_f32, Palette::BORDER))
                             .corner_radius(12.0)
                             .inner_margin(24.0)
                             .show(ui, |ui| {

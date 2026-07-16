@@ -536,7 +536,10 @@ pub fn encrypt_file(
             if n == 0 {
                 // Empty file or exact chunk boundary — finalize with empty last
                 let ct = encryptor
-                    .encrypt_last(Payload { msg: &[][..], aad: &aad })
+                    .encrypt_last(Payload {
+                        msg: &[][..],
+                        aad: &aad,
+                    })
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 out.write_all(&ct)?;
                 break;
@@ -557,7 +560,10 @@ pub fn encrypt_file(
                 // This is the last chunk
                 reporter.report(frac, "Encrypting final chunk...");
                 let ct = encryptor
-                    .encrypt_last(Payload { msg: &buf[..n], aad: &aad })
+                    .encrypt_last(Payload {
+                        msg: &buf[..n],
+                        aad: &aad,
+                    })
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 out.write_all(&ct)?;
                 break;
@@ -565,13 +571,16 @@ pub fn encrypt_file(
                 // More data follows — encrypt as intermediate chunk
                 reporter.report(frac, "Encrypting...");
                 let ct = encryptor
-                    .encrypt_next(Payload { msg: &buf[..n], aad: &aad })
+                    .encrypt_next(Payload {
+                        msg: &buf[..n],
+                        aad: &aad,
+                    })
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 out.write_all(&ct)?;
                 chunk_counter += 1;
 
                 // I/O Governor: periodically flush dirty pages to prevent OS lag.
-                if chunk_counter % IO_GOVENER_INTERVAL == 0 {
+                if chunk_counter.is_multiple_of(IO_GOVENER_INTERVAL) {
                     out.sync_data()?;
                     std::thread::sleep(Duration::from_millis(5));
                 }
@@ -829,9 +838,11 @@ fn decrypt_file_streaming(
             if let Some(prev) = last_chunk.take() {
                 let frac = 0.10 + 0.85 * (bytes_done as f32 / encrypted_body as f32);
                 reporter.report(frac, "Decrypting...");
-                let pt = Zeroizing::new(decryptor
-                    .decrypt_next(prev.as_slice())
-                    .map_err(|_| CryptoError::DecryptionFailed)?);
+                let pt = Zeroizing::new(
+                    decryptor
+                        .decrypt_next(prev.as_slice())
+                        .map_err(|_| CryptoError::DecryptionFailed)?,
+                );
                 out.write_all(pt.as_slice())?;
             }
 
@@ -842,9 +853,11 @@ fn decrypt_file_streaming(
         // Process the final chunk
         if let Some(final_data) = last_chunk {
             reporter.report(0.95, "Decrypting final chunk...");
-            let pt = Zeroizing::new(decryptor
-                .decrypt_last(final_data.as_slice())
-                .map_err(|_| CryptoError::DecryptionFailed)?);
+            let pt = Zeroizing::new(
+                decryptor
+                    .decrypt_last(final_data.as_slice())
+                    .map_err(|_| CryptoError::DecryptionFailed)?,
+            );
             out.write_all(pt.as_slice())?;
         }
 
@@ -1126,7 +1139,10 @@ pub fn encrypt_stream<R: Read + Seek, W: Write>(
         let n = read_exact_or_eof(reader, buf.as_mut_slice())?;
         if n == 0 {
             let ct = encryptor
-                .encrypt_last(Payload { msg: &[][..], aad: &aad })
+                .encrypt_last(Payload {
+                    msg: &[][..],
+                    aad: &aad,
+                })
                 .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
             writer.write_all(&ct)?;
             break;
@@ -1149,19 +1165,25 @@ pub fn encrypt_stream<R: Read + Seek, W: Write>(
         if peeked == 0 {
             reporter.report(frac, "Encrypting final chunk...");
             let ct = encryptor
-                .encrypt_last(Payload { msg: &buf[..n], aad: &aad })
+                .encrypt_last(Payload {
+                    msg: &buf[..n],
+                    aad: &aad,
+                })
                 .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
             writer.write_all(&ct)?;
             break;
         } else {
             reporter.report(frac, "Encrypting...");
             let ct = encryptor
-                .encrypt_next(Payload { msg: &buf[..n], aad: &aad })
+                .encrypt_next(Payload {
+                    msg: &buf[..n],
+                    aad: &aad,
+                })
                 .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
             writer.write_all(&ct)?;
             chunk_counter += 1;
 
-            if chunk_counter % IO_GOVERNOR_INTERVAL == 0 {
+            if chunk_counter.is_multiple_of(IO_GOVERNOR_INTERVAL) {
                 writer.flush()?;
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -1247,9 +1269,11 @@ fn decrypt_stream_v3<R: Read, W: Write>(
                 0.50
             };
             reporter.report(frac, "Decrypting...");
-            let pt = Zeroizing::new(decryptor
-                .decrypt_next(prev.as_slice())
-                .map_err(|_| CryptoError::DecryptionFailed)?);
+            let pt = Zeroizing::new(
+                decryptor
+                    .decrypt_next(prev.as_slice())
+                    .map_err(|_| CryptoError::DecryptionFailed)?,
+            );
             writer.write_all(pt.as_slice())?;
         }
 
@@ -1259,9 +1283,11 @@ fn decrypt_stream_v3<R: Read, W: Write>(
 
     if let Some(final_data) = last_chunk {
         reporter.report(0.95, "Decrypting final chunk...");
-        let pt = Zeroizing::new(decryptor
-            .decrypt_last(final_data.as_slice())
-            .map_err(|_| CryptoError::DecryptionFailed)?);
+        let pt = Zeroizing::new(
+            decryptor
+                .decrypt_last(final_data.as_slice())
+                .map_err(|_| CryptoError::DecryptionFailed)?,
+        );
         writer.write_all(pt.as_slice())?;
     } else {
         return Err(CryptoError::FileTooSmall);
@@ -1377,15 +1403,17 @@ fn decrypt_stream_v2<R: Read, W: Write>(
 
     let aad = build_aad(&salt, &nonce);
     reporter.report(0.50, "Decrypting data (AES-256-GCM-SIV)...");
-    let plaintext = Zeroizing::new(cipher
-        .decrypt(
-            Nonce::from_slice(&nonce),
-            Payload {
-                msg: &ciphertext,
-                aad: &aad,
-            },
-        )
-        .map_err(|_| CryptoError::DecryptionFailed)?);
+    let plaintext = Zeroizing::new(
+        cipher
+            .decrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: &ciphertext,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| CryptoError::DecryptionFailed)?,
+    );
     writer.write_all(plaintext.as_slice())?;
 
     writer.flush()?;
@@ -1434,7 +1462,15 @@ mod tests {
 
         fs::write(&src_path, b"File content for testing").unwrap();
 
-        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
+        encrypt_file(
+            &src_path,
+            &encrypted_path,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        )
+        .unwrap();
         assert!(encrypted_path.exists());
 
         decrypt_file(
@@ -1523,7 +1559,14 @@ mod tests {
         fs::write(&src_path, b"secret").unwrap();
         fs::write(&dest_path, b"already here").unwrap();
 
-        let result = encrypt_file(&src_path, &dest_path, false, password.as_bytes(), &reporter, None);
+        let result = encrypt_file(
+            &src_path,
+            &dest_path,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        );
         assert!(matches!(result, Err(CryptoError::FileAlreadyExists(_))));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1542,7 +1585,14 @@ mod tests {
         fs::write(&src_path, b"secret").unwrap();
         fs::write(&dest_path, b"already here").unwrap();
 
-        let result = encrypt_file(&src_path, &dest_path, true, password.as_bytes(), &reporter, None);
+        let result = encrypt_file(
+            &src_path,
+            &dest_path,
+            true,
+            password.as_bytes(),
+            &reporter,
+            None,
+        );
         assert!(result.is_ok());
         assert!(dest_path.exists());
         assert_ne!(fs::read(&dest_path).unwrap(), b"already here");
@@ -1561,7 +1611,14 @@ mod tests {
 
         fs::write(&src_path, b"secret").unwrap();
 
-        let result = encrypt_file(&src_path, &src_path, false, password.as_bytes(), &reporter, None);
+        let result = encrypt_file(
+            &src_path,
+            &src_path,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        );
         assert!(matches!(
             result,
             Err(CryptoError::SourceAndDestinationSame(_))
@@ -1588,7 +1645,15 @@ mod tests {
             .collect();
         fs::write(&src_path, &data).unwrap();
 
-        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
+        encrypt_file(
+            &src_path,
+            &encrypted_path,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        )
+        .unwrap();
 
         // Verify the file starts with VAULTX04 (V4 is the current default format).
         let header = fs::read(&encrypted_path).unwrap();
@@ -1624,7 +1689,15 @@ mod tests {
         let data = vec![42u8; CHUNK_SIZE];
         fs::write(&src_path, &data).unwrap();
 
-        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
+        encrypt_file(
+            &src_path,
+            &encrypted_path,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        )
+        .unwrap();
         decrypt_file(
             &encrypted_path,
             &decrypted_path,
@@ -1652,7 +1725,15 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src_path, b"top secret data").unwrap();
-        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
+        encrypt_file(
+            &src_path,
+            &encrypted_path,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        )
+        .unwrap();
 
         let result = decrypt_file(
             &encrypted_path,
@@ -1678,7 +1759,13 @@ mod tests {
 
         let mut reader = std::io::Cursor::new(input);
         let mut output = Vec::new();
-        let result = decrypt_stream(&mut reader, &mut output, password.as_bytes(), None, &reporter);
+        let result = decrypt_stream(
+            &mut reader,
+            &mut output,
+            password.as_bytes(),
+            None,
+            &reporter,
+        );
 
         assert!(matches!(result, Err(CryptoError::FileTooSmall)));
         assert!(output.is_empty());
@@ -1707,7 +1794,15 @@ mod tests {
         }
 
         let dec_path = tmp_dir.join("legacy_dec.txt");
-        decrypt_file(&v2_path, &dec_path, false, password.as_bytes(), &reporter, None).unwrap();
+        decrypt_file(
+            &v2_path,
+            &dec_path,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        )
+        .unwrap();
         assert_eq!(fs::read(&dec_path).unwrap(), plaintext);
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1777,7 +1872,14 @@ mod tests {
         fs::write(&truncated, &full[..cut_len]).unwrap();
 
         let dec = tmp_dir.join("dec.bin");
-        let result = decrypt_file(&truncated, &dec, false, password.as_bytes(), &reporter, None);
+        let result = decrypt_file(
+            &truncated,
+            &dec,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        );
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1896,7 +1998,10 @@ mod tests {
         let password = "x".repeat(MIN_PASSWORD_LEN + 4);
         let reporter = TestReporter;
 
-        let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE * 2 + CHUNK_SIZE / 2).collect();
+        let data: Vec<u8> = (0u8..=255)
+            .cycle()
+            .take(CHUNK_SIZE * 2 + CHUNK_SIZE / 2)
+            .collect();
         fs::write(&src, &data).unwrap();
         encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
@@ -1915,7 +2020,14 @@ mod tests {
         fs::write(&reordered, &bytes).unwrap();
 
         let dec = tmp_dir.join("dec.bin");
-        let result = decrypt_file(&reordered, &dec, false, password.as_bytes(), &reporter, None);
+        let result = decrypt_file(
+            &reordered,
+            &dec,
+            false,
+            password.as_bytes(),
+            &reporter,
+            None,
+        );
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -2023,7 +2135,13 @@ mod tests {
 
         let mut reader = std::io::Cursor::new(input);
         let mut output = Vec::new();
-        let result = decrypt_stream(&mut reader, &mut output, password.as_bytes(), None, &reporter);
+        let result = decrypt_stream(
+            &mut reader,
+            &mut output,
+            password.as_bytes(),
+            None,
+            &reporter,
+        );
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
     }
 

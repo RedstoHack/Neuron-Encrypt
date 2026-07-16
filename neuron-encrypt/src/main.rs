@@ -39,7 +39,9 @@ fn main() -> eframe::Result<()> {
     #[cfg(debug_assertions)]
     // SAFETY: this runs single-threaded before eframe::run_native spawns any
     // thread, so there is no data race on the process environment.
-    unsafe { std::env::set_var("RUST_BACKTRACE", "1"); }
+    unsafe {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
     let viewport = egui::ViewportBuilder::default()
         .with_title("Neuron Encrypt")
         .with_inner_size(egui::vec2(620.0, 540.0))
@@ -90,6 +92,6 @@ fn apply_custom_theme(ctx: &egui::Context) {
     visuals.widgets.active.bg_fill = Palette::SURFACE_HI;
     visuals.override_text_color = Some(Palette::TEXT_HI);
     visuals.selection.bg_fill = Palette::accent_dim();
-    visuals.selection.stroke = Stroke::new(1.0, Palette::ACCENT);
+    visuals.selection.stroke = Stroke::new(1.0_f32, Palette::ACCENT);
     ctx.set_visuals(visuals);
 }
