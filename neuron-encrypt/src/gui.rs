@@ -452,6 +452,8 @@ impl NeuronEncryptApp {
         let password = self.password.clone();
         let mode = self.mode;
         let ctx_clone = ctx.clone();
+        // P1-2: clone the cancel_flag Arc so the spawned thread can poll it.
+        let cancel_for_thread = self.cancel_flag.clone();
         self.password = Zeroizing::new(String::new());
         self.confirm_password = Zeroizing::new(String::new());
         self.show_password = false;
@@ -461,9 +463,23 @@ impl NeuronEncryptApp {
             let throttled_reporter = ThrottledReporter::new(&reporter);
 
             let result = if mode == Mode::Encrypt {
-                crypto::encrypt_file(&file_path, &dest, false, password.as_bytes(), &throttled_reporter)
+                crypto::encrypt_file(
+                    &file_path,
+                    &dest,
+                    false,
+                    password.as_bytes(),
+                    &throttled_reporter,
+                    Some(&cancel_for_thread),
+                )
             } else {
-                crypto::decrypt_file(&file_path, &dest, false, password.as_bytes(), &throttled_reporter)
+                crypto::decrypt_file(
+                    &file_path,
+                    &dest,
+                    false,
+                    password.as_bytes(),
+                    &throttled_reporter,
+                    Some(&cancel_for_thread),
+                )
             };
 
             match result {
@@ -472,6 +488,14 @@ impl NeuronEncryptApp {
                     // Avoids leaking a plaintext-hash verifier via screenshots.
                     let hash = compute_sha256(&dest);
                     let _ = tx.try_send(GuiMsg::Done("Operation complete.".to_owned(), hash));
+                }
+                Err(CryptoError::Cancelled) => {
+                    // P1-2: user pressed Cancel. Report as Done (not Error) with a
+                    // clear message so the user doesn't see a scary "Error" screen.
+                    let _ = tx.try_send(GuiMsg::Done(
+                        "Operation cancelled by user. No output file was written.".to_owned(),
+                        None,
+                    ));
                 }
                 Err(e) => {
                     let _ = tx.try_send(GuiMsg::Error(e));
@@ -586,9 +610,9 @@ impl NeuronEncryptApp {
                 }
 
                 let result = if mode == Mode::Encrypt {
-                    crypto::encrypt_file(src, &dest, false, password.as_bytes(), &throttled)
+                    crypto::encrypt_file(src, &dest, false, password.as_bytes(), &throttled, Some(&cancel))
                 } else {
-                    crypto::decrypt_file(src, &dest, false, password.as_bytes(), &throttled)
+                    crypto::decrypt_file(src, &dest, false, password.as_bytes(), &throttled, Some(&cancel))
                 };
 
                 match result {
@@ -599,6 +623,12 @@ impl NeuronEncryptApp {
                             compute_sha256(src)
                         };
                         let _ = tx.try_send(GuiMsg::BatchFileDone(idx, out_path, hash));
+                    }
+                    Err(CryptoError::Cancelled) => {
+                        // P1-2: mid-file cancel in batch — mark this file as cancelled
+                        // and stop processing remaining files.
+                        let _ = tx.try_send(GuiMsg::BatchFileError(idx, "Cancelled".to_string()));
+                        break;
                     }
                     Err(e) => {
                         let _ = tx.try_send(GuiMsg::BatchFileError(idx, e.to_string()));
@@ -1349,9 +1379,32 @@ impl NeuronEncryptApp {
             });
 
         ui.add_space(14.0);
+
+        // P1-2: Cancel button — sets the cancel_flag, which the crypto thread
+        // polls at every chunk boundary. The thread then cleans up its .tmp
+        // file and returns CryptoError::Cancelled, which the message handler
+        // in update() converts into a "Cancelled by user" status.
+        ui.vertical_centered(|ui| {
+            let cancel_btn = egui::Button::new(
+                egui::RichText::new("CANCEL")
+                    .font(FontId::new(12.0, FontFamily::Monospace))
+                    .color(Palette::TEXT_HI),
+            )
+            .fill(Palette::SURFACE_2)
+            .stroke(Stroke::new(1.0, Palette::BORDER))
+            .corner_radius(6.0)
+            .min_size(egui::vec2(140.0, 32.0));
+
+            if ui.add(cancel_btn).clicked() {
+                self.cancel_flag.store(true, Ordering::SeqCst);
+                self.status = Some("Cancelling after current chunk...".to_owned());
+            }
+        });
+
+        ui.add_space(8.0);
         ui.label(
             egui::RichText::new(
-                "This run cannot be force-cancelled from the GUI once it has started.",
+                "Cancel takes effect after the current 1 MB chunk completes.",
             )
             .font(FontId::new(10.5, FontFamily::Monospace))
             .color(Palette::TEXT_LO),

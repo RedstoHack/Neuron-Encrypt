@@ -525,6 +525,7 @@ fn run() -> Result<(), ExitCode> {
                 cli.force,
                 password.as_slice(),
                 &throttled,
+                None,
             )
         } else {
             crypto::decrypt_file(
@@ -533,6 +534,7 @@ fn run() -> Result<(), ExitCode> {
                 cli.force,
                 password.as_slice(),
                 &throttled,
+                None,
             )
         };
 

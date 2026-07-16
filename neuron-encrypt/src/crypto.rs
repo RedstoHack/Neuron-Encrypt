@@ -4,8 +4,8 @@
 use std::fs;
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 #[cfg(target_os = "windows")]
 use std::time::SystemTime;
 use std::time::{Duration, Instant};
@@ -406,6 +406,7 @@ pub fn encrypt_file(
     overwrite: bool,
     password: &[u8],
     reporter: &dyn ProgressReporter,
+    cancel_flag: Option<&Arc<AtomicBool>>,
 ) -> CryptoResult<PathBuf> {
     if password.len() < MIN_PASSWORD_LEN {
         return Err(CryptoError::PassphraseTooShort(MIN_PASSWORD_LEN));
@@ -463,6 +464,16 @@ pub fn encrypt_file(
         const IO_GOVENER_INTERVAL: u64 = 100; // ~100 MB between flushes
 
         loop {
+            // P1-2: check for user cancellation at the top of each chunk iteration.
+            // Cleanup the .tmp file and return Cancelled so the caller can show
+            // an appropriate message.
+            if let Some(flag) = cancel_flag {
+                if flag.load(Ordering::SeqCst) {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(CryptoError::Cancelled);
+                }
+            }
+
             let n = read_exact_or_eof(&mut file, buf.as_mut_slice())?;
             if n == 0 {
                 // Empty file or exact chunk boundary — finalize with empty last
@@ -546,9 +557,17 @@ pub fn decrypt_file(
     overwrite: bool,
     password: &[u8],
     reporter: &dyn ProgressReporter,
+    cancel_flag: Option<&Arc<AtomicBool>>,
 ) -> CryptoResult<PathBuf> {
     if password.len() < MIN_PASSWORD_LEN {
         return Err(CryptoError::PassphraseTooShort(MIN_PASSWORD_LEN));
+    }
+
+    // Check for cancellation before starting work.
+    if let Some(flag) = cancel_flag {
+        if flag.load(Ordering::SeqCst) {
+            return Err(CryptoError::Cancelled);
+        }
     }
 
     // Read magic bytes to determine format version
@@ -560,9 +579,9 @@ pub fn decrypt_file(
     }
 
     if &magic_buf == MAGIC {
-        decrypt_file_legacy(src, dest, overwrite, password, reporter)
+        decrypt_file_legacy(src, dest, overwrite, password, reporter, cancel_flag)
     } else if &magic_buf == MAGIC_V3 {
-        decrypt_file_streaming(src, dest, overwrite, password, reporter)
+        decrypt_file_streaming(src, dest, overwrite, password, reporter, cancel_flag)
     } else {
         Err(CryptoError::InvalidMagic)
     }
@@ -575,6 +594,7 @@ fn decrypt_file_legacy(
     overwrite: bool,
     password: &[u8],
     reporter: &dyn ProgressReporter,
+    cancel_flag: Option<&Arc<AtomicBool>>,
 ) -> CryptoResult<PathBuf> {
     let (file, source_metadata) = open_regular_file(src)?;
     let dest = validate_destination_path(src, dest, overwrite)?;
@@ -590,6 +610,13 @@ fn decrypt_file_legacy(
             size_gb: source_len as f64 / 1_000_000_000.0,
             max_gb: MAX_ENCRYPTED_FILE_SIZE as f64 / 1_000_000_000.0,
         });
+    }
+
+    // Check for cancellation before starting V2 decryption (Argon2id is expensive).
+    if let Some(flag) = cancel_flag {
+        if flag.load(Ordering::SeqCst) {
+            return Err(CryptoError::Cancelled);
+        }
     }
 
     eprintln!("[INFO] VAULTX02 (V2) format detected. Consider re-encrypting with V3 for streaming support and no memory limits.");
@@ -669,6 +696,7 @@ fn decrypt_file_streaming(
     overwrite: bool,
     password: &[u8],
     reporter: &dyn ProgressReporter,
+    cancel_flag: Option<&Arc<AtomicBool>>,
 ) -> CryptoResult<PathBuf> {
     let (mut file, source_metadata) = open_regular_file(src)?;
     let dest = validate_destination_path(src, dest, overwrite)?;
@@ -722,6 +750,14 @@ fn decrypt_file_streaming(
 
         // Read all chunks, processing intermediate ones immediately
         loop {
+            // P1-2: check for user cancellation. Clean up the .tmp file and return.
+            if let Some(flag) = cancel_flag {
+                if flag.load(Ordering::SeqCst) {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(CryptoError::Cancelled);
+                }
+            }
+
             let n = read_exact_or_eof(&mut file, &mut buf)?;
             if n == 0 {
                 break;
@@ -1113,7 +1149,7 @@ mod tests {
 
         fs::write(&src_path, b"File content for testing").unwrap();
 
-        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
         assert!(encrypted_path.exists());
 
         decrypt_file(
@@ -1122,6 +1158,7 @@ mod tests {
             false,
             password.as_bytes(),
             &reporter,
+            None,
         )
         .unwrap();
         assert!(decrypted_path.exists());
@@ -1201,7 +1238,7 @@ mod tests {
         fs::write(&src_path, b"secret").unwrap();
         fs::write(&dest_path, b"already here").unwrap();
 
-        let result = encrypt_file(&src_path, &dest_path, false, password.as_bytes(), &reporter);
+        let result = encrypt_file(&src_path, &dest_path, false, password.as_bytes(), &reporter, None);
         assert!(matches!(result, Err(CryptoError::FileAlreadyExists(_))));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1220,7 +1257,7 @@ mod tests {
         fs::write(&src_path, b"secret").unwrap();
         fs::write(&dest_path, b"already here").unwrap();
 
-        let result = encrypt_file(&src_path, &dest_path, true, password.as_bytes(), &reporter);
+        let result = encrypt_file(&src_path, &dest_path, true, password.as_bytes(), &reporter, None);
         assert!(result.is_ok());
         assert!(dest_path.exists());
         assert_ne!(fs::read(&dest_path).unwrap(), b"already here");
@@ -1239,7 +1276,7 @@ mod tests {
 
         fs::write(&src_path, b"secret").unwrap();
 
-        let result = encrypt_file(&src_path, &src_path, false, password.as_bytes(), &reporter);
+        let result = encrypt_file(&src_path, &src_path, false, password.as_bytes(), &reporter, None);
         assert!(matches!(
             result,
             Err(CryptoError::SourceAndDestinationSame(_))
@@ -1266,7 +1303,7 @@ mod tests {
             .collect();
         fs::write(&src_path, &data).unwrap();
 
-        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
 
         // Verify the file starts with VAULTX03
         let header = fs::read(&encrypted_path).unwrap();
@@ -1278,6 +1315,7 @@ mod tests {
             false,
             password.as_bytes(),
             &reporter,
+            None,
         )
         .unwrap();
         let result = fs::read(&decrypted_path).unwrap();
@@ -1301,13 +1339,14 @@ mod tests {
         let data = vec![42u8; CHUNK_SIZE];
         fs::write(&src_path, &data).unwrap();
 
-        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
         decrypt_file(
             &encrypted_path,
             &decrypted_path,
             false,
             password.as_bytes(),
             &reporter,
+            None,
         )
         .unwrap();
         assert_eq!(fs::read(&decrypted_path).unwrap(), data);
@@ -1328,7 +1367,7 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src_path, b"top secret data").unwrap();
-        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
 
         let result = decrypt_file(
             &encrypted_path,
@@ -1336,6 +1375,7 @@ mod tests {
             false,
             wrong.as_bytes(),
             &reporter,
+            None,
         );
         assert!(result.is_err());
 
@@ -1382,7 +1422,7 @@ mod tests {
         }
 
         let dec_path = tmp_dir.join("legacy_dec.txt");
-        decrypt_file(&v2_path, &dec_path, false, password.as_bytes(), &reporter).unwrap();
+        decrypt_file(&v2_path, &dec_path, false, password.as_bytes(), &reporter, None).unwrap();
         assert_eq!(fs::read(&dec_path).unwrap(), plaintext);
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1403,9 +1443,9 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src, b"").unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
         assert_eq!(fs::metadata(&enc).unwrap().len(), 47);
-        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter).unwrap();
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter, None).unwrap();
         assert_eq!(fs::read(&dec).unwrap(), b"");
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1422,8 +1462,8 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src, b"A").unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
-        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter, None).unwrap();
         assert_eq!(fs::read(&dec).unwrap(), b"A");
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1443,7 +1483,7 @@ mod tests {
 
         let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE * 2 + 100).collect();
         fs::write(&src, &data).unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
         // Truncate: keep 31-byte header + first chunk only (CHUNK_SIZE + TAG_LEN bytes)
         let full = fs::read(&enc).unwrap();
@@ -1452,7 +1492,7 @@ mod tests {
         fs::write(&truncated, &full[..cut_len]).unwrap();
 
         let dec = tmp_dir.join("dec.bin");
-        let result = decrypt_file(&truncated, &dec, false, password.as_bytes(), &reporter);
+        let result = decrypt_file(&truncated, &dec, false, password.as_bytes(), &reporter, None);
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1468,7 +1508,7 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src, b"sensitive data").unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
         // Flip a bit in the salt (bytes 8..24)
         let mut bytes = fs::read(&enc).unwrap();
@@ -1477,7 +1517,7 @@ mod tests {
         fs::write(&tampered, &bytes).unwrap();
 
         let dec = tmp_dir.join("dec.txt");
-        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter);
+        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter, None);
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1493,7 +1533,7 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src, b"sensitive data").unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
         // Flip a bit in the stream_nonce (bytes 24..31)
         let mut bytes = fs::read(&enc).unwrap();
@@ -1502,7 +1542,7 @@ mod tests {
         fs::write(&tampered, &bytes).unwrap();
 
         let dec = tmp_dir.join("dec.txt");
-        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter);
+        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter, None);
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1518,7 +1558,7 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src, b"sensitive data here").unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
         // Flip a bit in the body (after header)
         let mut bytes = fs::read(&enc).unwrap();
@@ -1529,7 +1569,7 @@ mod tests {
         fs::write(&tampered, &bytes).unwrap();
 
         let dec = tmp_dir.join("dec.txt");
-        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter);
+        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter, None);
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1547,7 +1587,7 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src, b"sensitive data").unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
         let mut bytes = fs::read(&enc).unwrap();
         bytes[..8].copy_from_slice(MAGIC); // overwrite VAULTX03 with VAULTX02
@@ -1555,7 +1595,7 @@ mod tests {
         fs::write(&swapped, &bytes).unwrap();
 
         let dec = tmp_dir.join("dec.txt");
-        let result = decrypt_file(&swapped, &dec, false, password.as_bytes(), &reporter);
+        let result = decrypt_file(&swapped, &dec, false, password.as_bytes(), &reporter, None);
         assert!(result.is_err());
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1573,23 +1613,24 @@ mod tests {
 
         let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE * 2 + CHUNK_SIZE / 2).collect();
         fs::write(&src, &data).unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
         let mut bytes = fs::read(&enc).unwrap();
         let body = &mut bytes[HEADER_V3_LEN..];
         let chunk_stride = CHUNK_SIZE + TAG_LEN;
         assert!(body.len() >= 2 * chunk_stride);
-        // Swap chunks 0 and 1 (in place)
-        let mut buf = vec![0u8; chunk_stride];
-        buf.copy_from_slice(&body[..chunk_stride]);
-        body[..chunk_stride].copy_from_slice(&body[chunk_stride..2 * chunk_stride]);
-        body[chunk_stride..2 * chunk_stride].copy_from_slice(&buf);
+        // Swap chunks 0 and 1 using split_at_mut to avoid overlapping borrows.
+        let (first_half, _second_half) = body.split_at_mut(2 * chunk_stride);
+        let (chunk0, chunk1) = first_half.split_at_mut(chunk_stride);
+        for i in 0..chunk_stride {
+            std::mem::swap(&mut chunk0[i], &mut chunk1[i]);
+        }
 
         let reordered = tmp_dir.join("reordered.vx2");
         fs::write(&reordered, &bytes).unwrap();
 
         let dec = tmp_dir.join("dec.bin");
-        let result = decrypt_file(&reordered, &dec, false, password.as_bytes(), &reporter);
+        let result = decrypt_file(&reordered, &dec, false, password.as_bytes(), &reporter, None);
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1607,7 +1648,7 @@ mod tests {
         let reporter = TestReporter;
 
         fs::write(&src, b"sensitive data here").unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
         let mut bytes = fs::read(&enc).unwrap();
         bytes.extend_from_slice(&[0xABu8; 64]);
@@ -1615,7 +1656,7 @@ mod tests {
         fs::write(&extended, &bytes).unwrap();
 
         let dec = tmp_dir.join("dec.txt");
-        let result = decrypt_file(&extended, &dec, false, password.as_bytes(), &reporter);
+        let result = decrypt_file(&extended, &dec, false, password.as_bytes(), &reporter, None);
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1632,10 +1673,10 @@ mod tests {
 
         fs::write(&src, b"data").unwrap();
 
-        let r1 = encrypt_file(&src, &enc, false, b"1234567", &reporter);
+        let r1 = encrypt_file(&src, &enc, false, b"1234567", &reporter, None);
         assert!(matches!(r1, Err(CryptoError::PassphraseTooShort(_))));
 
-        let r2 = encrypt_file(&src, &enc, false, b"12345678", &reporter);
+        let r2 = encrypt_file(&src, &enc, false, b"12345678", &reporter, None);
         assert!(r2.is_ok());
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1654,8 +1695,8 @@ mod tests {
 
         let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE - 1).collect();
         fs::write(&src, &data).unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
-        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter, None).unwrap();
         assert_eq!(fs::read(&dec).unwrap(), data);
 
         let _ = fs::remove_dir_all(tmp_dir);
@@ -1674,8 +1715,8 @@ mod tests {
 
         let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE + 1).collect();
         fs::write(&src, &data).unwrap();
-        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter).unwrap();
-        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter).unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter, None).unwrap();
         assert_eq!(fs::read(&dec).unwrap(), data);
 
         let _ = fs::remove_dir_all(tmp_dir);
