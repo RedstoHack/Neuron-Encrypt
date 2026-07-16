@@ -6,7 +6,7 @@ use thiserror::Error;
 /// All errors that can occur during encryption/decryption operations.
 #[derive(Error, Debug)]
 pub enum CryptoError {
-    #[error("File too small to be a valid VAULTX02 encrypted file")]
+    #[error("File too small to be a valid Neuron Encrypt file")]
     FileTooSmall,
 
     #[error("Not a valid Neuron Encrypt file (bad magic bytes)")]
@@ -51,7 +51,7 @@ pub enum CryptoError {
     #[error("Invalid nonce length: expected {expected} bytes, got {actual}")]
     InvalidNonceLength { expected: usize, actual: usize },
 
-    #[error("Passphrase too short (minimum {0} characters required)")]
+    #[error("Passphrase too short (minimum {0} bytes required)")]
     PassphraseTooShort(usize),
 
     #[error("Legacy V2 file exceeds the 1 GB memory limit — re-encrypt with V3 format")]

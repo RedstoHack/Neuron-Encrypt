@@ -599,6 +599,17 @@ pub fn encrypt_file(
         return Err(error);
     }
 
+    // A2-4 fix: re-check cancel AFTER the loop completes but BEFORE persisting
+    // the temp file. Without this, if cancel fires after encrypt_last succeeds
+    // but before persist_temp_file renames, the user sees "cancelled" but the
+    // output file is still written — contradicting the cancel message.
+    if let Some(flag) = cancel_flag {
+        if flag.load(Ordering::SeqCst) {
+            let _ = fs::remove_file(&tmp);
+            return Err(CryptoError::Cancelled);
+        }
+    }
+
     persist_temp_file(&tmp, &dest)?;
     reporter.report(1.00, "Encryption complete.");
     Ok(dest)
@@ -744,6 +755,14 @@ fn decrypt_file_legacy(
         return Err(error);
     }
 
+    // A2-4 fix: re-check cancel before persisting the temp file.
+    if let Some(flag) = cancel_flag {
+        if flag.load(Ordering::SeqCst) {
+            let _ = fs::remove_file(&tmp);
+            return Err(CryptoError::Cancelled);
+        }
+    }
+
     persist_temp_file(&tmp, &dest)?;
 
     #[cfg(target_os = "windows")]
@@ -868,6 +887,14 @@ fn decrypt_file_streaming(
     if let Err(error) = write_result {
         let _ = fs::remove_file(&tmp);
         return Err(error);
+    }
+
+    // A2-4 fix: re-check cancel before persisting the temp file.
+    if let Some(flag) = cancel_flag {
+        if flag.load(Ordering::SeqCst) {
+            let _ = fs::remove_file(&tmp);
+            return Err(CryptoError::Cancelled);
+        }
     }
 
     persist_temp_file(&tmp, &dest)?;
@@ -1006,6 +1033,14 @@ fn decrypt_file_streaming_v4(
     if let Err(error) = write_result {
         let _ = fs::remove_file(&tmp);
         return Err(error);
+    }
+
+    // A2-4 fix: re-check cancel before persisting the temp file.
+    if let Some(flag) = cancel_flag {
+        if flag.load(Ordering::SeqCst) {
+            let _ = fs::remove_file(&tmp);
+            return Err(CryptoError::Cancelled);
+        }
     }
 
     persist_temp_file(&tmp, &dest)?;
@@ -1182,6 +1217,16 @@ pub fn encrypt_stream<R: Read + Seek, W: Write>(
                 .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
             writer.write_all(&ct)?;
             chunk_counter += 1;
+
+            // A2-1 fix: runtime counter guard — even when source_size=None
+            // (e.g. caller doesn't know the size), we still prevent counter
+            // wraparound. 2^32 intermediate chunks is the BE32 limit.
+            if chunk_counter >= u32::MAX as u64 {
+                return Err(CryptoError::FileTooLarge {
+                    size_gb: (chunk_counter * CHUNK_SIZE as u64) as f64 / 1_000_000_000.0,
+                    max_gb: MAX_V4_FILE_SIZE as f64 / 1_000_000_000.0,
+                });
+            }
 
             if chunk_counter.is_multiple_of(IO_GOVERNOR_INTERVAL) {
                 writer.flush()?;

@@ -632,11 +632,10 @@ impl NeuronEncryptApp {
 
                 match result {
                     Ok(out_path) => {
-                        let hash = if mode == Mode::Decrypt {
-                            compute_sha256(&out_path)
-                        } else {
-                            compute_sha256(src)
-                        };
+                        // C2-1 fix: always hash the OUTPUT file (ciphertext on encrypt,
+                        // plaintext on decrypt). Previously batch mode hashed the source
+                        // on encrypt — a screenshot-leak verifier for the plaintext.
+                        let hash = compute_sha256(&out_path);
                         let _ = tx.try_send(GuiMsg::BatchFileDone(idx, out_path, hash));
                     }
                     Err(CryptoError::Cancelled) => {
