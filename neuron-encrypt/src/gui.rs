@@ -15,7 +15,8 @@ use eframe::egui::{
 use neuron_encrypt_core::crypto::{self, ProgressReporter, ThrottledReporter};
 use neuron_encrypt_core::error::CryptoError;
 use neuron_encrypt_core::utils::{constant_time_eq, format_size, is_vx2_file};
-use rand_core::RngCore;
+// P2-UI: rand_core import removed — was only used for scramble_text generation,
+// which is deleted. The crypto module has its own OsRng import.
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -153,7 +154,7 @@ pub struct NeuronEncryptApp {
     status: Option<String>,
     spinner_index: usize,
     last_spinner_tick: Instant,
-    scramble_text: String,
+    // P2-UI: scramble_text field removed — ACTIVITY panel was deleted.
     reencrypt_confirmed: bool,
     strength_frac: f32,
     prog_frac: f32,
@@ -264,7 +265,6 @@ impl NeuronEncryptApp {
             status: None,
             spinner_index: 0,
             last_spinner_tick: Instant::now(),
-            scramble_text: String::from("0x0000...0000"),
             reencrypt_confirmed: false,
             strength_frac: 0.0,
             prog_frac: 0.0,
@@ -293,7 +293,6 @@ impl NeuronEncryptApp {
         self.reencrypt_confirmed = false;
         self.strength_frac = 0.0;
         self.check_anim = 0.0;
-        self.scramble_text = String::from("0x0000...0000");
         self.cancel_flag.store(false, Ordering::SeqCst);
 
         // Clear all GUI state and focus to drop transient internal buffers
@@ -884,7 +883,7 @@ impl NeuronEncryptApp {
             rect,
             12.0,
             Stroke::new(
-            1.0_f32,
+                1.0_f32,
                 if hover_drop {
                     Palette::ACCENT
                 } else {
@@ -1079,7 +1078,7 @@ impl NeuronEncryptApp {
             rect,
             8.0,
             Stroke::new(
-            1.0_f32,
+                1.0_f32,
                 if focus {
                     Palette::BORDER_FOCUS
                 } else {
@@ -1110,6 +1109,10 @@ impl NeuronEncryptApp {
     fn draw_strength_meter(&self, ui: &mut egui::Ui, label: &str) {
         let strength = eval_strength(&self.password).0;
 
+        // P2-UI: Single-line layout — "Strength: <word>" with a thin bar below.
+        // Removed the multi-line breakdown and the misleading "Use at least N
+        // characters" hint (NIST 800-63B Rev. 4 says composition rules are
+        // misleading; the strength word is enough).
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new("Strength")
@@ -1120,15 +1123,16 @@ impl NeuronEncryptApp {
                 ui.label(
                     egui::RichText::new(label)
                         .font(FontId::new(11.0, FontFamily::Monospace))
-                        .color(strength_color(strength)),
+                        .color(strength_color(strength))
+                        .strong(),
                 );
             });
         });
 
         ui.add_space(6.0);
-        let (bar_rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 5.0), Sense::hover());
+        let (bar_rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0), Sense::hover());
         let painter = ui.painter_at(bar_rect);
-        painter.rect_filled(bar_rect, 3.0, Palette::BORDER);
+        painter.rect_filled(bar_rect, 2.0, Palette::BORDER);
         let fill_rect = Rect::from_min_max(
             bar_rect.min,
             Pos2::new(
@@ -1136,17 +1140,7 @@ impl NeuronEncryptApp {
                 bar_rect.max.y,
             ),
         );
-        painter.rect_filled(fill_rect, 3.0, strength_color(strength));
-
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(format!(
-                "Use at least {} characters. Longer phrases with numbers and symbols score better.",
-                crypto::MIN_PASSWORD_LEN
-            ))
-            .font(FontId::new(10.5, FontFamily::Monospace))
-            .color(Palette::TEXT_LO),
-        );
+        painter.rect_filled(fill_rect, 2.0, strength_color(strength));
     }
 
     fn draw_notice(
@@ -1192,7 +1186,21 @@ impl NeuronEncryptApp {
         ui.add_space(16.0);
         self.draw_file_summary(ui);
 
-        ui.add_space(18.0);
+        // P2-UI: Contextual one-liner above the password field — educates the
+        // user about what's happening without dumping crypto jargon (sii.pl
+        // principle #2: educate in context).
+        ui.add_space(14.0);
+        let context_line = match self.mode {
+            Mode::Encrypt => "Enter a passphrase to encrypt this file. You'll need it to decrypt later — there is no recovery.",
+            Mode::Decrypt => "Enter the passphrase used to encrypt this file.",
+        };
+        ui.label(
+            egui::RichText::new(context_line)
+                .font(FontId::new(11.0, FontFamily::Monospace))
+                .color(Palette::TEXT_MED),
+        );
+
+        ui.add_space(12.0);
         self.draw_password_row(ui, "Passphrase", true);
 
         if self.mode == Mode::Encrypt {
@@ -1217,6 +1225,80 @@ impl NeuronEncryptApp {
 
         ui.add_space(14.0);
         self.draw_strength_meter(ui, strength_label);
+
+        // P2-UI: Hide cipher/KDF details behind an "Advanced" CollapsingHeader.
+        // Per UI research §7.5, non-experts don't need to see "AES-256-GCM-SIV
+        // BE32" — defaults are correct, surface them only when asked.
+        ui.add_space(10.0);
+        egui::CollapsingHeader::new("Advanced")
+            .default_open(false)
+            .show(ui, |ui| {
+                egui::Grid::new("advanced_grid")
+                    .num_columns(2)
+                    .striped(false)
+                    .min_col_width(120.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("Cipher")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_LO),
+                        );
+                        ui.label(
+                            egui::RichText::new("AES-256-GCM-SIV (RFC 8452)")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_MED),
+                        );
+                        ui.end_row();
+
+                        ui.label(
+                            egui::RichText::new("Streaming")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_LO),
+                        );
+                        ui.label(
+                            egui::RichText::new("BE32, 1 MiB chunks")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_MED),
+                        );
+                        ui.end_row();
+
+                        ui.label(
+                            egui::RichText::new("KDF")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_LO),
+                        );
+                        ui.label(
+                            egui::RichText::new("Argon2id (256 MiB / 3 / 4)")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_MED),
+                        );
+                        ui.end_row();
+
+                        ui.label(
+                            egui::RichText::new("Key expansion")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_LO),
+                        );
+                        ui.label(
+                            egui::RichText::new("HKDF-SHA512")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_MED),
+                        );
+                        ui.end_row();
+
+                        ui.label(
+                            egui::RichText::new("Format")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_LO),
+                        );
+                        ui.label(
+                            egui::RichText::new("VAULTX04 (with header AAD)")
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_MED),
+                        );
+                        ui.end_row();
+                    });
+            });
 
         if self.mode == Mode::Encrypt
             && self
@@ -1378,28 +1460,11 @@ impl NeuronEncryptApp {
             .font(FontId::new(11.0, FontFamily::Monospace))
             .color(Palette::TEXT_MED),
         );
-        ui.add_space(12.0);
-
-        egui::Frame::new()
-            .fill(Palette::SURFACE_1)
-            .stroke(Stroke::new(1.0_f32, Palette::BORDER))
-            .corner_radius(8.0)
-            .inner_margin(12.0)
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("ACTIVITY")
-                        .font(FontId::new(10.0, FontFamily::Monospace))
-                        .color(Palette::TEXT_ACCENT),
-                );
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(&self.scramble_text)
-                        .font(FontId::new(11.0, FontFamily::Monospace))
-                        .color(Palette::TEXT_LO),
-                );
-            });
-
         ui.add_space(14.0);
+
+        // P2-UI: Removed the scramble-text "ACTIVITY" panel — it was decorative
+        // CPU burn that read as a movie prop (anti-pattern per UI research §5).
+        // The progress %, status line, and Cancel button are all the user needs.
 
         // P1-2: Cancel button — sets the cancel_flag, which the crypto thread
         // polls at every chunk boundary. The thread then cleans up its .tmp
@@ -1485,24 +1550,32 @@ impl NeuronEncryptApp {
                 ui.add_space(14.0);
             }
 
+            // P2-UI: Move SHA-256 hash into a collapsed "Details" section so it
+            // doesn't clutter the success screen. Per UI research §7.3, the hash
+            // is a post-operation verifier, not a status indicator.
             if let Some(hash) = &self.sha256_hash {
-                ui.label(
-                    egui::RichText::new("SHA-256")
-                        .font(FontId::new(9.5, FontFamily::Monospace))
-                        .color(Palette::TEXT_LO),
-                );
-                ui.add_space(2.0);
-                let hash_display = if hash.len() > 48 {
-                    format!("{}...{}", &hash[..24], &hash[hash.len() - 24..])
-                } else {
-                    hash.clone()
-                };
-                ui.label(
-                    egui::RichText::new(hash_display)
-                        .font(FontId::new(10.5, FontFamily::Monospace))
-                        .color(Palette::TEXT_LO),
-                );
-                ui.add_space(14.0);
+                ui.add_space(8.0);
+                egui::CollapsingHeader::new("Details")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("SHA-256 (output file)")
+                                .font(FontId::new(9.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_LO),
+                        );
+                        ui.add_space(2.0);
+                        let hash_display = if hash.len() > 48 {
+                            format!("{}...{}", &hash[..24], &hash[hash.len() - 24..])
+                        } else {
+                            hash.clone()
+                        };
+                        ui.label(
+                            egui::RichText::new(hash_display)
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(Palette::TEXT_LO),
+                        );
+                    });
+                ui.add_space(8.0);
             }
 
             if ok {
@@ -1918,12 +1991,8 @@ impl eframe::App for NeuronEncryptApp {
             if Instant::now().duration_since(self.last_spinner_tick) >= Duration::from_millis(80) {
                 self.last_spinner_tick = Instant::now();
                 self.spinner_index = (self.spinner_index + 1) % 4;
-
-                let mut rng = rand_core::OsRng;
-                let random_hex: String = (0..32)
-                    .map(|_| std::char::from_digit(rng.next_u32() % 16, 16).unwrap_or('0'))
-                    .collect();
-                self.scramble_text = format!("0x{}...{}", &random_hex[..12], &random_hex[20..]);
+                // P2-UI: scramble_text generation removed — the ACTIVITY panel
+                // that consumed it is gone. Saves CPU and RNG calls per frame.
             }
 
             self.prog_frac += (self.progress - self.prog_frac) * 0.15;
@@ -1965,19 +2034,9 @@ impl eframe::App for NeuronEncryptApp {
                             });
 
                         ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                                    .font(FontId::new(10.0, FontFamily::Monospace))
-                                    .color(Palette::TEXT_LO),
-                            );
-                            ui.hyperlink_to(
-                                egui::RichText::new("github.com/darkmaster0345/Neuron-Encrypt")
-                                    .font(FontId::new(10.0, FontFamily::Monospace))
-                                    .color(Palette::TEXT_LO),
-                                "https://github.com/darkmaster0345/Neuron-Encrypt",
-                            );
-                        });
+                        // P2-UI: Removed version stamp + GitHub link from bottom of every
+                        // screen. Version belongs in About (accessible via title bar dot),
+                        // not on every screen. Reduces visual clutter.
                     });
                 });
             });
