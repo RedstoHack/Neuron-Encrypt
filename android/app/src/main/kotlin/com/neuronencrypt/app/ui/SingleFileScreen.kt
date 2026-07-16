@@ -85,7 +85,7 @@ fun SingleFileScreen(
         inputSize = info.second
         val magic = detectMagicBytes(context, uri)
         detectedMagic = magic
-        if (magic == "VAULTX02" || magic == "VAULTX03") {
+        if (magic == "VAULTX02" || magic == "VAULTX03" || magic == "VAULTX04") {
             fileMode = FileMode.Decrypt
         } else {
             fileMode = FileMode.Encrypt
@@ -678,6 +678,7 @@ fun detectMagicBytes(context: Context, uri: Uri): String? {
             if (n == 8) {
                 if (magic.contentEquals("VAULTX02".toByteArray())) return "VAULTX02"
                 if (magic.contentEquals("VAULTX03".toByteArray())) return "VAULTX03"
+                if (magic.contentEquals("VAULTX04".toByteArray())) return "VAULTX04"
             }
         }
     } catch (e: Exception) {

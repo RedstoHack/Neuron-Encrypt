@@ -65,6 +65,29 @@ pub const CHUNK_SIZE: usize = 1_048_576;
 /// GCM-SIV confidentiality and integrity.
 pub const MAX_V3_FILE_SIZE: u64 = (1u64 << 32) * CHUNK_SIZE as u64;
 
+// ── V4 (current) constants ──
+//
+// V4 is identical to V3 in every way (same cipher, KDF, chunking, header
+// layout, file-size limit) EXCEPT that every encrypt_next / encrypt_last /
+// decrypt_next / decrypt_last call passes the header bytes
+// (MAGIC_V4 || salt || stream_nonce) as Additional Authenticated Data (AAD).
+//
+// This closes the defensive-in-depth gap identified in audit finding 5-1:
+// V3 does not authenticate the salt or stream_nonce, so an attacker who
+// tampers with them in transit causes a silent DoS (wrong key derived →
+// all chunk tags fail → DecryptionFailed). V4 makes any tampering with
+// the header detectable at the AEAD layer on every chunk, not just via
+// the indirect effect on the derived key.
+//
+// V3 files remain fully readable for backward compatibility. New encryptions
+// default to V4. There is no V3->V4 auto-migration; users who want V4 must
+// re-encrypt.
+pub const MAGIC_V4: &[u8; 8] = b"VAULTX04";
+/// V4 reuses the V3 header layout: 8 (magic) + 16 (salt) + 7 (stream_nonce) = 31 bytes.
+pub const HEADER_V4_LEN: usize = HEADER_V3_LEN;
+/// V4 file-size limit is the same as V3 (same BE32 counter constraint).
+pub const MAX_V4_FILE_SIZE: u64 = MAX_V3_FILE_SIZE;
+
 // ── V2 legacy limits (kept for backward-compat decryption) ──
 pub const MAX_FILE_SIZE: u64 = 8_000_000_000;
 pub const MAX_ENCRYPTED_FILE_SIZE: u64 = MAX_FILE_SIZE + HEADER_LEN as u64 + TAG_LEN as u64;
@@ -201,10 +224,39 @@ fn derive_key_v3(password: &[u8], salt: &[u8]) -> CryptoResult<Zeroizing<Vec<u8>
     Ok(final_key)
 }
 
+/// V4 key derivation — same Argon2id + HKDF pipeline as V3, but with a
+/// distinct HKDF info string so V3 and V4 keys are cryptographically
+/// independent even for identical (password, salt) pairs.
+fn derive_key_v4(password: &[u8], salt: &[u8]) -> CryptoResult<Zeroizing<Vec<u8>>> {
+    let mut final_key = Zeroizing::new(vec![0u8; 32]);
+    let mut intermediate = Zeroizing::new(vec![0u8; 64]);
+    let params = Params::new(262_144, 3, 4, Some(64))
+        .map_err(|e| CryptoError::Argon2Failed(e.to_string()))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    argon2
+        .hash_password_into(password, salt, &mut intermediate)
+        .map_err(|e| CryptoError::Argon2Failed(e.to_string()))?;
+    let hkdf = Hkdf::<Sha512>::new(None, &intermediate);
+    hkdf.expand(b"VAULTX04_AES_256_GCM_SIV_STREAM_AAD", &mut final_key)
+        .map_err(|e| CryptoError::HkdfFailed(e.to_string()))?;
+    intermediate.zeroize();
+    Ok(final_key)
+}
+
 fn build_aad(salt: &[u8], nonce: &[u8]) -> Vec<u8> {
     let mut aad = Vec::with_capacity(SALT_LEN + NONCE_LEN);
     aad.extend_from_slice(salt);
     aad.extend_from_slice(nonce);
+    aad
+}
+
+/// V4 AAD builder — authenticates the full header (magic || salt || stream_nonce)
+/// so any tampering with header bytes is detected at the AEAD layer on every chunk.
+fn build_aad_v4(salt: &[u8], stream_nonce: &[u8]) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(8 + SALT_V3_LEN + STREAM_NONCE_LEN);
+    aad.extend_from_slice(MAGIC_V4);
+    aad.extend_from_slice(salt);
+    aad.extend_from_slice(stream_nonce);
     aad
 }
 
@@ -417,10 +469,11 @@ pub fn encrypt_file(
     let source_len = source_metadata.len();
 
     // Guard against counter-wraparound in EncryptorBE32 (4-byte counter at 1 MiB chunks).
-    if source_len > MAX_V3_FILE_SIZE {
+    // V4 uses the same BE32 stream cipher as V3, so the limit is identical.
+    if source_len > MAX_V4_FILE_SIZE {
         return Err(CryptoError::FileTooLarge {
             size_gb: source_len as f64 / 1_000_000_000.0,
-            max_gb: MAX_V3_FILE_SIZE as f64 / 1_000_000_000.0,
+            max_gb: MAX_V4_FILE_SIZE as f64 / 1_000_000_000.0,
         });
     }
 
@@ -430,10 +483,15 @@ pub fn encrypt_file(
     OsRng.fill_bytes(&mut stream_nonce);
 
     reporter.report(0.05, "Deriving encryption key (Argon2id)...");
-    let key = derive_key_v3(password, &salt)?;
+    // P1-6: V4 uses a distinct HKDF info string for cross-version domain separation.
+    let key = derive_key_v4(password, &salt)?;
 
     let cipher = Aes256GcmSiv::new(key.as_slice().into());
     let mut encryptor = EncryptorBE32::from_aead(cipher, (&stream_nonce).into());
+
+    // P1-6: V4 AAD authenticates the full header (magic || salt || stream_nonce)
+    // so any tampering with header bytes is detected at the AEAD layer on every chunk.
+    let aad = build_aad_v4(&salt, &stream_nonce);
 
     let tmp = tmp_path(&dest);
     let write_result = (|| -> CryptoResult<()> {
@@ -452,8 +510,8 @@ pub fn encrypt_file(
             .create_new(true)
             .open(&tmp)?;
 
-        // Write V3 header
-        out.write_all(MAGIC_V3)?;
+        // Write V4 header
+        out.write_all(MAGIC_V4)?;
         out.write_all(&salt)?;
         out.write_all(&stream_nonce)?;
 
@@ -478,7 +536,7 @@ pub fn encrypt_file(
             if n == 0 {
                 // Empty file or exact chunk boundary — finalize with empty last
                 let ct = encryptor
-                    .encrypt_last(&[][..])
+                    .encrypt_last(Payload { msg: &[][..], aad: &aad })
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 out.write_all(&ct)?;
                 break;
@@ -499,7 +557,7 @@ pub fn encrypt_file(
                 // This is the last chunk
                 reporter.report(frac, "Encrypting final chunk...");
                 let ct = encryptor
-                    .encrypt_last(&buf[..n])
+                    .encrypt_last(Payload { msg: &buf[..n], aad: &aad })
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 out.write_all(&ct)?;
                 break;
@@ -507,7 +565,7 @@ pub fn encrypt_file(
                 // More data follows — encrypt as intermediate chunk
                 reporter.report(frac, "Encrypting...");
                 let ct = encryptor
-                    .encrypt_next(&buf[..n])
+                    .encrypt_next(Payload { msg: &buf[..n], aad: &aad })
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 out.write_all(&ct)?;
                 chunk_counter += 1;
@@ -580,7 +638,11 @@ pub fn decrypt_file(
 
     if &magic_buf == MAGIC {
         decrypt_file_legacy(src, dest, overwrite, password, reporter, cancel_flag)
+    } else if &magic_buf == MAGIC_V4 {
+        // P1-6: V4 path — AAD-authenticated streaming format (current default).
+        decrypt_file_streaming_v4(src, dest, overwrite, password, reporter, cancel_flag)
     } else if &magic_buf == MAGIC_V3 {
+        // V3 path — backward compat, no AAD on header.
         decrypt_file_streaming(src, dest, overwrite, password, reporter, cancel_flag)
     } else {
         Err(CryptoError::InvalidMagic)
@@ -811,6 +873,144 @@ fn decrypt_file_streaming(
     Ok(dest)
 }
 
+/// V4 streaming decryption — same chunking as V3 but with AAD covering the header.
+/// Used for files with the VAULTX04 magic bytes (the current default format).
+fn decrypt_file_streaming_v4(
+    src: &Path,
+    dest: &Path,
+    overwrite: bool,
+    password: &[u8],
+    reporter: &dyn ProgressReporter,
+    cancel_flag: Option<&Arc<AtomicBool>>,
+) -> CryptoResult<PathBuf> {
+    let (mut file, source_metadata) = open_regular_file(src)?;
+    let dest = validate_destination_path(src, dest, overwrite)?;
+    let file_len = source_metadata.len();
+    #[cfg(target_os = "windows")]
+    let (src_accessed, src_modified) = (
+        source_metadata.accessed().ok(),
+        source_metadata.modified().ok(),
+    );
+
+    if file_len < HEADER_V4_LEN as u64 + TAG_LEN as u64 {
+        return Err(CryptoError::FileTooSmall);
+    }
+
+    // Skip magic (already read by dispatcher), read salt + nonce
+    file.seek(std::io::SeekFrom::Start(8))?;
+    let mut salt = [0u8; SALT_V3_LEN];
+    let mut stream_nonce = [0u8; STREAM_NONCE_LEN];
+    file.read_exact(&mut salt)?;
+    file.read_exact(&mut stream_nonce)?;
+
+    reporter.report(0.05, "Deriving decryption key (Argon2id)...");
+    let key = derive_key_v4(password, &salt)?;
+
+    let cipher = Aes256GcmSiv::new(key.as_slice().into());
+    let mut decryptor = DecryptorBE32::from_aead(cipher, (&stream_nonce).into());
+
+    // P1-6: V4 AAD authenticates the full header. Every chunk's tag is computed
+    // over (plaintext, AAD, counter, flag) — any tampering with the header bytes
+    // is detected on the first chunk's tag verification.
+    let aad = build_aad_v4(&salt, &stream_nonce);
+
+    let encrypted_body = file_len - HEADER_V4_LEN as u64;
+    let enc_chunk_size = CHUNK_SIZE + TAG_LEN;
+
+    let tmp = tmp_path(&dest);
+    let write_result = (|| -> CryptoResult<()> {
+        #[cfg(unix)]
+        let mut out = {
+            use std::os::unix::fs::OpenOptionsExt;
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?
+        };
+        #[cfg(not(unix))]
+        let mut out = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+
+        let mut buf = Zeroizing::new(vec![0u8; enc_chunk_size]);
+        let mut bytes_done: u64 = 0;
+        let mut last_chunk: Option<Zeroizing<Vec<u8>>> = None;
+
+        // Read all chunks, processing intermediate ones immediately
+        loop {
+            // P1-2: check for user cancellation. Clean up the .tmp file and return.
+            if let Some(flag) = cancel_flag {
+                if flag.load(Ordering::SeqCst) {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(CryptoError::Cancelled);
+                }
+            }
+
+            let n = read_exact_or_eof(&mut file, &mut buf)?;
+            if n == 0 {
+                break;
+            }
+
+            // If we had a pending chunk, it wasn't the last — decrypt it now
+            if let Some(prev) = last_chunk.take() {
+                let frac = 0.10 + 0.85 * (bytes_done as f32 / encrypted_body as f32);
+                reporter.report(frac, "Decrypting...");
+                let pt = Zeroizing::new(
+                    decryptor
+                        .decrypt_next(Payload {
+                            msg: prev.as_slice(),
+                            aad: &aad,
+                        })
+                        .map_err(|_| CryptoError::DecryptionFailed)?,
+                );
+                out.write_all(pt.as_slice())?;
+            }
+
+            bytes_done += n as u64;
+            last_chunk = Some(Zeroizing::new(buf[..n].to_vec()));
+        }
+
+        // Process the final chunk
+        if let Some(final_data) = last_chunk {
+            reporter.report(0.95, "Decrypting final chunk...");
+            let pt = Zeroizing::new(
+                decryptor
+                    .decrypt_last(Payload {
+                        msg: final_data.as_slice(),
+                        aad: &aad,
+                    })
+                    .map_err(|_| CryptoError::DecryptionFailed)?,
+            );
+            out.write_all(pt.as_slice())?;
+        }
+
+        out.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
+    }
+
+    persist_temp_file(&tmp, &dest)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(file) = fs::File::open(&dest) {
+            let times = fs::FileTimes::new()
+                .set_accessed(src_accessed.unwrap_or(SystemTime::now()))
+                .set_modified(src_modified.unwrap_or(SystemTime::now()));
+            let _ = file.set_times(times);
+        }
+    }
+
+    reporter.report(1.00, "Decryption complete.");
+    Ok(dest)
+}
+
 /// Attempts a 3-pass random overwrite, rename, and deletion of `path`.
 ///
 /// WARNING: This is not cryptographically guaranteed on SSDs, APFS, Btrfs, ZFS,
@@ -889,10 +1089,10 @@ pub fn encrypt_stream<R: Read + Seek, W: Write>(
 
     // Guard against counter-wraparound if the caller knows the size.
     if let Some(size) = source_size {
-        if size > MAX_V3_FILE_SIZE {
+        if size > MAX_V4_FILE_SIZE {
             return Err(CryptoError::FileTooLarge {
                 size_gb: size as f64 / 1_000_000_000.0,
-                max_gb: MAX_V3_FILE_SIZE as f64 / 1_000_000_000.0,
+                max_gb: MAX_V4_FILE_SIZE as f64 / 1_000_000_000.0,
             });
         }
     }
@@ -903,13 +1103,17 @@ pub fn encrypt_stream<R: Read + Seek, W: Write>(
     OsRng.fill_bytes(&mut stream_nonce);
 
     reporter.report(0.05, "Deriving encryption key (Argon2id)...");
-    let key = derive_key_v3(password, &salt)?;
+    // P1-6: V4 uses a distinct HKDF info string for cross-version domain separation.
+    let key = derive_key_v4(password, &salt)?;
 
     let cipher = Aes256GcmSiv::new(key.as_slice().into());
     let mut encryptor = EncryptorBE32::from_aead(cipher, (&stream_nonce).into());
 
-    // Write header
-    writer.write_all(MAGIC_V3)?;
+    // P1-6: V4 AAD authenticates the full header.
+    let aad = build_aad_v4(&salt, &stream_nonce);
+
+    // Write V4 header
+    writer.write_all(MAGIC_V4)?;
     writer.write_all(&salt)?;
     writer.write_all(&stream_nonce)?;
 
@@ -922,7 +1126,7 @@ pub fn encrypt_stream<R: Read + Seek, W: Write>(
         let n = read_exact_or_eof(reader, buf.as_mut_slice())?;
         if n == 0 {
             let ct = encryptor
-                .encrypt_last(&[][..])
+                .encrypt_last(Payload { msg: &[][..], aad: &aad })
                 .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
             writer.write_all(&ct)?;
             break;
@@ -945,14 +1149,14 @@ pub fn encrypt_stream<R: Read + Seek, W: Write>(
         if peeked == 0 {
             reporter.report(frac, "Encrypting final chunk...");
             let ct = encryptor
-                .encrypt_last(&buf[..n])
+                .encrypt_last(Payload { msg: &buf[..n], aad: &aad })
                 .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
             writer.write_all(&ct)?;
             break;
         } else {
             reporter.report(frac, "Encrypting...");
             let ct = encryptor
-                .encrypt_next(&buf[..n])
+                .encrypt_next(Payload { msg: &buf[..n], aad: &aad })
                 .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
             writer.write_all(&ct)?;
             chunk_counter += 1;
@@ -992,7 +1196,10 @@ pub fn decrypt_stream<R: Read, W: Write>(
             _ => CryptoError::Io(error),
         })?;
 
-    if &magic == MAGIC_V3 {
+    if &magic == MAGIC_V4 {
+        // P1-6: V4 path — AAD-authenticated streaming format (current default).
+        decrypt_stream_v4(reader, writer, password, total_size, reporter)
+    } else if &magic == MAGIC_V3 {
         decrypt_stream_v3(reader, writer, password, total_size, reporter)
     } else if &magic == MAGIC {
         decrypt_stream_v2(reader, writer, password, reporter)
@@ -1055,6 +1262,84 @@ fn decrypt_stream_v3<R: Read, W: Write>(
         let pt = Zeroizing::new(decryptor
             .decrypt_last(final_data.as_slice())
             .map_err(|_| CryptoError::DecryptionFailed)?);
+        writer.write_all(pt.as_slice())?;
+    } else {
+        return Err(CryptoError::FileTooSmall);
+    }
+
+    writer.flush()?;
+    reporter.report(1.00, "Decryption complete.");
+    Ok(())
+}
+
+/// V4 stream decryption — same chunking as V3 but with AAD covering the header.
+fn decrypt_stream_v4<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    password: &[u8],
+    total_size: Option<u64>,
+    reporter: &dyn ProgressReporter,
+) -> CryptoResult<()> {
+    let mut salt = [0u8; SALT_V3_LEN];
+    let mut stream_nonce = [0u8; STREAM_NONCE_LEN];
+    reader.read_exact(&mut salt)?;
+    reader.read_exact(&mut stream_nonce)?;
+
+    reporter.report(0.05, "Deriving decryption key (Argon2id)...");
+    let key = derive_key_v4(password, &salt)?;
+
+    let cipher = Aes256GcmSiv::new(key.as_slice().into());
+    let mut decryptor = DecryptorBE32::from_aead(cipher, (&stream_nonce).into());
+
+    // P1-6: V4 AAD authenticates the full header.
+    let aad = build_aad_v4(&salt, &stream_nonce);
+
+    let mut buf = Zeroizing::new(vec![0u8; CHUNK_SIZE + TAG_LEN]);
+    let mut bytes_done: u64 = 0;
+    let mut last_chunk: Option<Zeroizing<Vec<u8>>> = None;
+
+    loop {
+        let n = read_exact_or_eof(reader, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+
+        if let Some(prev) = last_chunk.take() {
+            let frac = if let Some(total) = total_size {
+                if total > 0 {
+                    0.10 + 0.85 * (bytes_done as f32 / total as f32)
+                } else {
+                    0.50
+                }
+            } else {
+                0.50
+            };
+            reporter.report(frac, "Decrypting...");
+            let pt = Zeroizing::new(
+                decryptor
+                    .decrypt_next(Payload {
+                        msg: prev.as_slice(),
+                        aad: &aad,
+                    })
+                    .map_err(|_| CryptoError::DecryptionFailed)?,
+            );
+            writer.write_all(pt.as_slice())?;
+        }
+
+        bytes_done += n as u64;
+        last_chunk = Some(Zeroizing::new(buf[..n].to_vec()));
+    }
+
+    if let Some(final_data) = last_chunk {
+        reporter.report(0.95, "Decrypting final chunk...");
+        let pt = Zeroizing::new(
+            decryptor
+                .decrypt_last(Payload {
+                    msg: final_data.as_slice(),
+                    aad: &aad,
+                })
+                .map_err(|_| CryptoError::DecryptionFailed)?,
+        );
         writer.write_all(pt.as_slice())?;
     } else {
         return Err(CryptoError::FileTooSmall);
@@ -1305,9 +1590,9 @@ mod tests {
 
         encrypt_file(&src_path, &encrypted_path, false, password.as_bytes(), &reporter, None).unwrap();
 
-        // Verify the file starts with VAULTX03
+        // Verify the file starts with VAULTX04 (V4 is the current default format).
         let header = fs::read(&encrypted_path).unwrap();
-        assert_eq!(&header[..8], MAGIC_V3);
+        assert_eq!(&header[..8], MAGIC_V4);
 
         decrypt_file(
             &encrypted_path,
@@ -1576,9 +1861,9 @@ mod tests {
     }
 
     #[test]
-    fn test_v3_magic_swap_v3_to_v2_fails() {
-        // Attacker rewrites VAULTX03 → VAULTX02. Dispatcher should route to V2 path,
-        // which fails because the V3 layout is incompatible with V2 expectations.
+    fn test_v4_magic_swap_v4_to_v2_fails() {
+        // Attacker rewrites VAULTX04 → VAULTX02. Dispatcher should route to V2 path,
+        // which fails because the V4 layout is incompatible with V2 expectations.
         let tmp_dir = unique_test_dir();
         fs::create_dir_all(&tmp_dir).unwrap();
         let src = tmp_dir.join("plain.txt");
@@ -1590,7 +1875,7 @@ mod tests {
         encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
 
         let mut bytes = fs::read(&enc).unwrap();
-        bytes[..8].copy_from_slice(MAGIC); // overwrite VAULTX03 with VAULTX02
+        bytes[..8].copy_from_slice(MAGIC); // overwrite VAULTX04 with VAULTX02
         let swapped = tmp_dir.join("swapped.vx2");
         fs::write(&swapped, &bytes).unwrap();
 
@@ -1748,5 +2033,221 @@ mod tests {
         assert_eq!(MAX_V3_FILE_SIZE, (1u64 << 32) * CHUNK_SIZE as u64);
         // 4 PiB expressed in bytes:
         assert_eq!(MAX_V3_FILE_SIZE, 1u64 << 52);
+    }
+
+    // ── P1-6 V4 format tests ──
+
+    #[test]
+    fn test_v4_constants_sanity() {
+        // V4 reuses V3 header layout and file-size limit.
+        assert_eq!(HEADER_V4_LEN, HEADER_V3_LEN);
+        assert_eq!(MAX_V4_FILE_SIZE, MAX_V3_FILE_SIZE);
+        assert_eq!(MAGIC_V4, b"VAULTX04");
+        // V3 and V4 magics must be distinct (else dispatch is ambiguous).
+        assert_ne!(MAGIC_V3, MAGIC_V4);
+    }
+
+    #[test]
+    fn test_v4_encrypt_produces_v4_magic() {
+        // New encryptions must default to V4.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"hello v4").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+
+        let bytes = fs::read(&enc).unwrap();
+        assert_eq!(&bytes[..8], MAGIC_V4);
+        assert_ne!(&bytes[..8], MAGIC_V3);
+        assert_ne!(&bytes[..8], MAGIC);
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v4_roundtrip_multi_chunk() {
+        // V4 encrypt -> decrypt roundtrip with a 2.5 MB file (multiple chunks).
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("big.bin");
+        let enc = tmp_dir.join("big.vx2");
+        let dec = tmp_dir.join("big_dec.bin");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        let data: Vec<u8> = (0u8..=255)
+            .cycle()
+            .take(CHUNK_SIZE * 2 + CHUNK_SIZE / 2)
+            .collect();
+        fs::write(&src, &data).unwrap();
+
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+        assert_eq!(&fs::read(&enc).unwrap()[..8], MAGIC_V4);
+
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter, None).unwrap();
+        assert_eq!(fs::read(&dec).unwrap(), data);
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v4_tampered_salt_fails_at_aad() {
+        // V4 AAD covers the salt. Tampering with the salt byte must cause
+        // DecryptionFailed (either because the derived key changes OR because
+        // the AAD no longer matches what was used at encrypt time).
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"sensitive data").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+
+        let mut bytes = fs::read(&enc).unwrap();
+        bytes[8] ^= 0x01; // flip a bit in salt[0]
+        let tampered = tmp_dir.join("tampered.vx2");
+        fs::write(&tampered, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.txt");
+        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter, None);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v4_tampered_nonce_fails_at_aad() {
+        // V4 AAD covers the stream_nonce. Tampering must cause DecryptionFailed.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"sensitive data").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+
+        let mut bytes = fs::read(&enc).unwrap();
+        bytes[24] ^= 0x80; // flip a bit in stream_nonce[0]
+        let tampered = tmp_dir.join("tampered.vx2");
+        fs::write(&tampered, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.txt");
+        let result = decrypt_file(&tampered, &dec, false, password.as_bytes(), &reporter, None);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v4_tampered_magic_fails() {
+        // V4 AAD covers MAGIC_V4. If an attacker changes magic to anything else
+        // (e.g., MAGIC_V3 to try the V3 path), the V3 path will run derive_key_v3
+        // (wrong key, because V4 used derive_key_v4) and fail. So this is
+        // defense-in-depth: even if dispatcher misroutes, decryption fails.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("plain.txt");
+        let enc = tmp_dir.join("plain.vx2");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"sensitive data").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+
+        let mut bytes = fs::read(&enc).unwrap();
+        bytes[..8].copy_from_slice(MAGIC_V3); // try to force V3 path on a V4 file
+        let swapped = tmp_dir.join("swapped.vx2");
+        fs::write(&swapped, &bytes).unwrap();
+
+        let dec = tmp_dir.join("dec.txt");
+        let result = decrypt_file(&swapped, &dec, false, password.as_bytes(), &reporter, None);
+        // V3 path will derive a V3 key (different HKDF info) and fail at tag verification.
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v4_empty_file_roundtrip() {
+        // V4 encrypt -> decrypt of a 0-byte file.
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("empty.bin");
+        let enc = tmp_dir.join("empty.vx2");
+        let dec = tmp_dir.join("empty_dec.bin");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+        // 31-byte header + 16-byte tag for empty last chunk = 47 bytes total.
+        assert_eq!(fs::metadata(&enc).unwrap().len(), 47);
+        decrypt_file(&enc, &dec, false, password.as_bytes(), &reporter, None).unwrap();
+        assert_eq!(fs::read(&dec).unwrap(), b"");
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v4_wrong_password_fails() {
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let src = tmp_dir.join("secret.txt");
+        let enc = tmp_dir.join("secret.vx2");
+        let dec = tmp_dir.join("dec.txt");
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let wrong = "y".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+
+        fs::write(&src, b"top secret").unwrap();
+        encrypt_file(&src, &enc, false, password.as_bytes(), &reporter, None).unwrap();
+
+        let result = decrypt_file(&enc, &dec, false, wrong.as_bytes(), &reporter, None);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_v4_stream_roundtrip_via_pipe() {
+        // V4 encrypt_stream -> decrypt_stream roundtrip (CLI pipe path).
+        let password = "x".repeat(MIN_PASSWORD_LEN + 4);
+        let reporter = TestReporter;
+        let data: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE + 100).collect();
+
+        let mut encrypted = Vec::new();
+        let mut reader = std::io::Cursor::new(&data);
+        encrypt_stream(
+            &mut reader,
+            &mut encrypted,
+            password.as_bytes(),
+            Some(data.len() as u64),
+            &reporter,
+        )
+        .unwrap();
+
+        // Verify V4 magic.
+        assert_eq!(&encrypted[..8], MAGIC_V4);
+
+        let mut decrypted = Vec::new();
+        let mut enc_reader = std::io::Cursor::new(&encrypted);
+        decrypt_stream(
+            &mut enc_reader,
+            &mut decrypted,
+            password.as_bytes(),
+            Some(encrypted.len() as u64),
+            &reporter,
+        )
+        .unwrap();
+
+        assert_eq!(decrypted, data);
     }
 }
