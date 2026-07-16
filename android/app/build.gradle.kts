@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.neuronencrypt.app"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 34
         versionCode = 2
         versionName = "2.1.0"
