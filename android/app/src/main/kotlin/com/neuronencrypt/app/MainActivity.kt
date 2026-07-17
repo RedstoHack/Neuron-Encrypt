@@ -123,7 +123,14 @@ class MainActivity : ComponentActivity() {
             if (perms.size > keepCount) {
                 perms.drop(keepCount).forEach { p ->
                     try {
-                        contentResolver.releasePersistableUriPermission(p.uri, p.persistedFlags)
+                        // Compute flags from read/write permission booleans
+                        // (the public 'flags' field is not accessible via Kotlin)
+                        var flags = 0
+                        if (p.isReadPermission) flags = flags or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        if (p.isWritePermission) flags = flags or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        if (flags != 0) {
+                            contentResolver.releasePersistableUriPermission(p.uri, flags)
+                        }
                     } catch (_: SecurityException) {
                         // Permission may already be released
                     }
