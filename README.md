@@ -136,6 +136,20 @@ Known limitations (by design):
 
 ---
 
+## Screenshots
+
+<div align="center">
+
+| Home | File Selection | Encryption Complete | About |
+|:---:|:---:|:---:|:---:|
+| ![Home Screen](docs/screenshots/home-screen.png) | ![File Picker](docs/screenshots/file-picker.png) | ![Success](docs/screenshots/success-screen.png) | ![About](docs/screenshots/about-dialog.png) |
+
+*Android app — dark theme, Material 3*
+
+</div>
+
+---
+
 ## How To Use
 
 ### Encrypting a File

@@ -8,9 +8,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.neuronencrypt.app.BuildConfig
 import com.neuronencrypt.app.ui.theme.*
 
 @Composable
@@ -126,7 +128,7 @@ fun HomeScreen(
             },
             text = {
                 Column {
-                    Text("Version 2.0.0", color = TextMed, fontSize = 13.sp)
+                    Text("Version ${BuildConfig.VERSION_NAME}", color = TextMed, fontSize = 13.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "AES-256-GCM-SIV + Argon2id + HKDF-SHA512",

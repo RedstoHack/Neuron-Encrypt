@@ -1,0 +1,1 @@
+v2.1.0 — Security audit fixes, V4 format with AAD, GUI cancel button, Android 7.0+ support.

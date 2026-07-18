@@ -1,0 +1,42 @@
+Neuron Encrypt is a local file encryption app that keeps your files private. No accounts, no internet, no cloud — everything happens on your device.
+
+<b>Security</b>
+• AES-256-GCM-SIV (RFC 8452) — nonce-misuse resistant authenticated encryption
+• Argon2id key derivation (256 MiB memory cost) — GPU/ASIC resistant
+• HKDF-SHA512 key expansion with per-version domain separation
+• VAULTX04 format with authenticated header (AAD on every chunk)
+• 100% Safe Rust core — zero unsafe blocks in the crypto library
+• Zero internet permissions, zero storage permissions (uses SAF)
+• Keys and plaintext wiped from RAM with Zeroizing<T> on drop
+
+<b>Features</b>
+• Encrypt any file to a .vx2 container
+• Decrypt .vx2 files back to original
+• Batch processing — queue multiple files with one passphrase
+• Auto-detects encrypt vs decrypt mode from file magic bytes
+• Cancel mid-operation (within one 1 MiB chunk)
+• Password strength meter
+• Secure wipe original file after encryption (with confirmation)
+• Open source (GPLv3)
+
+<b>How it works</b>
+1. Select a file (or drop one from your file manager)
+2. Enter a strong passphrase
+3. Tap ENCRYPT — your file is encrypted to .vx2 beside the original
+4. Optionally wipe the original file
+
+Your passphrase never leaves the device. There is no recovery — if you forget the passphrase, your files are gone. This is by design.
+
+<b>Privacy</b>
+• No analytics, no tracking, no telemetry
+• No network permissions in the APK
+• No storage permissions (uses Android Storage Access Framework)
+• No backup (android:allowBackup=false)
+• Source code available at github.com/darkmaster0345/Neuron-Encrypt
+
+<b>Technical specs</b>
+• Cipher: AES-256-GCM-SIV with BE32 streaming (1 MiB chunks)
+• KDF: Argon2id (m=256 MiB, t=3, p=4, 64-byte output)
+• RNG: OS CSPRNG (OsRng via getrandom)
+• Min Android: 7.0 (API 24)
+• ABIs: arm64-v8a, armeabi-v7a, x86_64, x86

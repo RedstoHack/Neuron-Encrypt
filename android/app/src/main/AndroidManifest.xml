@@ -4,7 +4,8 @@
     <application
         android:label="Neuron Encrypt"
         android:theme="@style/Theme.NeuronEncrypt"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="false"
         android:allowBackup="false"
         android:fullBackupContent="false"
