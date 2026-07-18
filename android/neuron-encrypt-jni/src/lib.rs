@@ -4,9 +4,9 @@ use std::os::fd::{FromRawFd, RawFd};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 
-use jni::JNIEnv;
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject};
 use jni::sys::{jint, jlong};
+use jni::JNIEnv;
 use jni::JavaVM;
 
 use neuron_encrypt_core::crypto::{
@@ -113,6 +113,7 @@ fn map_error(env: &mut JNIEnv, err: CryptoError) -> jint {
         CryptoError::Argon2Failed(_)
         | CryptoError::HkdfFailed(_)
         | CryptoError::EncryptionFailed(_) => (1, "Cryptographic operation failed.".to_owned()),
+        CryptoError::Cancelled => (1, "Cancelled".to_owned()),
     };
 
     let _ = env.throw_new(EXCEPTION_CLASS, message);
@@ -128,12 +129,7 @@ fn zero_java_array(env: &mut JNIEnv, array: &JByteArray) {
     }
 }
 
-fn fail_with_exception(
-    env: &mut JNIEnv,
-    password: &JByteArray,
-    code: jint,
-    message: &str,
-) -> jint {
+fn fail_with_exception(env: &mut JNIEnv, password: &JByteArray, code: jint, message: &str) -> jint {
     zero_java_array(env, password);
     let _ = env.throw_new(EXCEPTION_CLASS, message);
     code
@@ -294,6 +290,27 @@ fn native_decrypt_impl(
     }
 }
 
+/// JNI entry point for `NeuronEncryptNative.nativeEncrypt`.
+///
+/// # Safety
+///
+/// This function is `unsafe extern "system"` because it is called by the JVM
+/// via the Java Native Interface. The caller (the JVM) must:
+///
+/// - Pass valid `input_fd` and `output_fd` values that refer to open OS file
+///   descriptors. The function takes ownership of these fds (via
+///   `File::from_raw_fd`) and will close them on return — the Java side must
+///   have called `ParcelFileDescriptor.detachFd()` to release its ownership
+///   before invoking this function.
+/// - Pass a non-null `password: JByteArray` reference owned by the current
+///   JNI frame. The function reads its contents and zeroes the array in-place
+///   before returning.
+/// - Pass non-null `progress_listener` and `cancel_flag` references that
+///   implement `ProgressListener.onProgress(float, String)` and
+///   `AtomicBoolean.get(): boolean` respectively.
+///
+/// Violating any of these may cause undefined behavior (use-after-free,
+/// null-pointer dereference, or closing of unrelated fds).
 #[no_mangle]
 pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nativeEncrypt(
     mut env: JNIEnv,
@@ -327,6 +344,13 @@ pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nat
     }
 }
 
+/// JNI entry point for `NeuronEncryptNative.nativeDecrypt`.
+///
+/// # Safety
+///
+/// Same safety contract as `Java_com_neuronencrypt_app_NeuronEncryptNative_nativeEncrypt`.
+/// See that function's safety doc for the full requirements on `input_fd`,
+/// `output_fd`, `password`, `progress_listener`, and `cancel_flag`.
 #[no_mangle]
 pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nativeDecrypt(
     mut env: JNIEnv,

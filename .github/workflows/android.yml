@@ -10,7 +10,65 @@ permissions:
   contents: read
 
 jobs:
+  # P2-7: lint + test the Rust crates (core + JNI) before building the APK.
+  # This catches bugs in the security-critical JNI boundary that the desktop
+  # CI workflow doesn't cover (release.yml only lints neuron-encrypt/, not
+  # android/neuron-encrypt-jni/).
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Install Rust Toolchain (stable + clippy + rustfmt)
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        components: clippy, rustfmt
+
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          neuron-encrypt/target
+          android/neuron-encrypt-jni/target
+        key: ${{ runner.os }}-lint-${{ hashFiles('neuron-encrypt/Cargo.lock', 'android/neuron-encrypt-jni/Cargo.lock') }}
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit --locked
+
+    - name: rustfmt check (core)
+      working-directory: neuron-encrypt
+      run: cargo fmt --all -- --check
+
+    - name: rustfmt check (JNI)
+      working-directory: android/neuron-encrypt-jni
+      run: cargo fmt --all -- --check
+
+    - name: clippy (core)
+      working-directory: neuron-encrypt
+      run: cargo clippy --all-targets -- -D warnings
+
+    - name: clippy (JNI, no target specified so it builds for host)
+      working-directory: android/neuron-encrypt-jni
+      run: cargo clippy --all-targets -- -D warnings
+
+    - name: cargo test (core, release mode for faster Argon2id)
+      working-directory: neuron-encrypt
+      run: cargo test --lib --release
+
+    - name: cargo audit (core)
+      working-directory: neuron-encrypt
+      run: cargo audit
+
+    - name: cargo audit (JNI)
+      working-directory: android/neuron-encrypt-jni
+      run: cargo audit
+
   build:
+    needs: lint-and-test
     runs-on: ubuntu-latest
 
     steps:

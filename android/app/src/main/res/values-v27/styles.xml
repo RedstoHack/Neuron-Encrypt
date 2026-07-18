@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 27+ (Android 8.1+) overlay: adds windowLightNavigationBar which
+     doesn't exist on API 24-26 (Android 7.0-8.0). Keeping it in a separate
+     values-v27 folder means older Android versions won't see the attribute
+     and won't emit a warning about unknown resources. -->
+<resources>
+    <style name="Theme.NeuronEncrypt" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:colorAccent">#6366F1</item>
+    </style>
+</resources>
