@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Foreground service for long-running crypto operations (keeps the process
+         alive when the user backgrounds the app mid-encryption). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="Neuron Encrypt"
         android:theme="@style/Theme.NeuronEncrypt"
@@ -34,6 +40,14 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Foreground service for crypto operations. dataSync type is for
+             long-running file processing tasks. -->
+        <service
+            android:name=".CryptoService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
     </application>
 
 </manifest>

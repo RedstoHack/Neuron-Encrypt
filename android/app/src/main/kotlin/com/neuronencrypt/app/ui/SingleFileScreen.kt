@@ -62,12 +62,12 @@ fun SingleFileScreen(
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
-    var inputUri by remember { mutableStateOf<Uri?>(null) }
-    var inputName by remember { mutableStateOf("") }
-    var inputSize by remember { mutableStateOf(0L) }
-    var detectedMagic by remember { mutableStateOf<String?>(null) }
+    var inputUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var inputName by rememberSaveable { mutableStateOf("") }
+    var inputSize by rememberSaveable { mutableStateOf(0L) }
+    var detectedMagic by rememberSaveable { mutableStateOf<String?>(null) }
 
-    var fileMode by remember { mutableStateOf(FileMode.Encrypt) }
+    var fileMode by rememberSaveable { mutableStateOf(FileMode.Encrypt) }
 
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
@@ -115,6 +115,15 @@ fun SingleFileScreen(
             cancelFlag.set(false)
             status = ProcessStatus.Running(0.0f, "Initializing...")
 
+            // Start ForegroundService to keep the process alive when backgrounded
+            val action = if (fileMode == FileMode.Encrypt) "Encrypting" else "Decrypting"
+            val serviceIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
+                action = com.neuronencrypt.app.CryptoService.ACTION_START
+                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName)
+                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+
             scope.launch {
                 val startTime = System.currentTimeMillis()
                 val passwordBytes = password.toByteArray()
@@ -122,6 +131,15 @@ fun SingleFileScreen(
                     override fun onProgress(fraction: Float, stage: String) {
                         scope.launch {
                             status = ProcessStatus.Running(fraction, stage)
+                            // Update notification progress
+                            val progress = (fraction * 100).toInt().coerceIn(0, 100)
+                            val updateIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
+                                action = com.neuronencrypt.app.CryptoService.ACTION_UPDATE
+                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName)
+                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action)
+                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_PROGRESS, progress)
+                            }
+                            androidx.core.content.ContextCompat.startForegroundService(context, updateIntent)
                         }
                     }
                 }
@@ -156,6 +174,11 @@ fun SingleFileScreen(
                     password = ""
                     confirmPassword = ""
                     cancelFlag.set(false)
+                    // Stop the foreground service
+                    val stopIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
+                        action = com.neuronencrypt.app.CryptoService.ACTION_STOP
+                    }
+                    context.stopService(stopIntent)
                 }
             }
         }
@@ -431,11 +454,13 @@ fun SingleFileScreen(
                         .padding(vertical = 48.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    CircularProgressIndicator(
-                        progress = running.progress,
+                    LinearProgressIndicator(
+                        progress = { running.progress },
                         color = Accent,
                         trackColor = Border,
-                        modifier = Modifier.size(80.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(

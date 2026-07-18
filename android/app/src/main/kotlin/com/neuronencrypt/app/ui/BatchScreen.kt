@@ -66,7 +66,7 @@ fun BatchScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     var selectedFiles by remember { mutableStateOf<List<BatchItem>>(emptyList()) }
-    var fileMode by remember { mutableStateOf(FileMode.Encrypt) }
+    var fileMode by rememberSaveable { mutableStateOf(FileMode.Encrypt) }
 
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
@@ -418,11 +418,13 @@ fun BatchScreen(onBack: () -> Unit) {
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    CircularProgressIndicator(
-                        progress = proc.progress,
+                    LinearProgressIndicator(
+                        progress = { proc.progress },
                         color = Accent,
                         trackColor = Border,
-                        modifier = Modifier.size(80.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(

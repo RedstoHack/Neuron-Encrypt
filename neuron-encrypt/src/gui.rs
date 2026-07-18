@@ -189,53 +189,149 @@ fn eval_strength(password: &str) -> (Strength, f32, &'static str) {
         return (Strength::None, 0.0, "None");
     }
 
-    let mut score: f32 = 0.0;
+    let len = password.chars().count();
+    let mut has_lower = false;
     let mut has_upper = false;
     let mut has_digit = false;
     let mut has_symbol = false;
-    let len = password.chars().count();
 
     for c in password.chars() {
-        if c.is_uppercase() {
+        if c.is_ascii_lowercase() {
+            has_lower = true;
+        } else if c.is_ascii_uppercase() {
             has_upper = true;
-        }
-        if c.is_numeric() {
+        } else if c.is_ascii_digit() {
             has_digit = true;
-        }
-        if !c.is_alphanumeric() {
+        } else {
             has_symbol = true;
         }
     }
 
-    if len >= 8 {
-        score += 1.0;
-    }
-    if len >= 12 {
-        score += 1.0;
-    }
-    if len >= 16 {
-        score += 1.0;
+    // Charset size
+    let mut charset_size: f64 = 0.0;
+    if has_lower {
+        charset_size += 26.0;
     }
     if has_upper {
-        score += 1.0;
+        charset_size += 26.0;
     }
     if has_digit {
-        score += 1.0;
+        charset_size += 10.0;
     }
     if has_symbol {
-        score += 1.0;
+        charset_size += 33.0;
+    }
+    if charset_size == 0.0 {
+        charset_size = 1.0;
     }
 
-    score = score.clamp(0.0, 6.0);
-    if score < 2.0 {
-        (Strength::Weak, score / 6.0, "Weak")
-    } else if score < 3.5 {
-        (Strength::Fair, score / 6.0, "Fair")
-    } else if score < 5.0 {
-        (Strength::Strong, score / 6.0, "Strong")
-    } else {
-        (Strength::Elite, score / 6.0, "Elite")
+    // Base entropy: len * log2(charset_size)
+    let mut entropy = (len as f64) * (charset_size.log2());
+
+    // Pattern penalties
+    entropy -= repeated_chars_penalty(password);
+    entropy -= sequence_penalty(password);
+    entropy -= common_password_penalty(password);
+
+    // Length bonus (passphrases are strong even with small charset)
+    if len >= 20 {
+        entropy += 10.0;
     }
+    if len >= 32 {
+        entropy += 15.0;
+    }
+
+    let entropy = entropy.max(0.0);
+    let fraction = ((entropy / 80.0) as f32).clamp(0.0, 1.0);
+
+    // Map entropy to strength tiers (NIST 800-63B guidance)
+    if entropy < 28.0 {
+        (Strength::Weak, fraction, "Weak")
+    } else if entropy < 36.0 {
+        (Strength::Fair, fraction, "Fair")
+    } else if entropy < 60.0 {
+        (Strength::Strong, fraction, "Strong")
+    } else {
+        (Strength::Elite, fraction, "Elite")
+    }
+}
+
+/// Penalize repeated characters (aaa, 111, !!!).
+fn repeated_chars_penalty(password: &str) -> f64 {
+    let chars: Vec<char> = password.chars().collect();
+    let mut penalty = 0.0f64;
+    let mut run_len = 1usize;
+    for i in 1..chars.len() {
+        if chars[i] == chars[i - 1] {
+            run_len += 1;
+        } else {
+            if run_len >= 3 {
+                penalty += ((run_len - 2) as f64) * 3.0;
+            }
+            run_len = 1;
+        }
+    }
+    if run_len >= 3 {
+        penalty += ((run_len - 2) as f64) * 3.0;
+    }
+    penalty
+}
+
+/// Penalize keyboard/alphabetical sequences (abc, 123, qwerty).
+fn sequence_penalty(password: &str) -> f64 {
+    let lower = password.to_lowercase();
+    let sequences = [
+        "abcdefghijklmnopqrstuvwxyz",
+        "qwertyuiop",
+        "asdfghjkl",
+        "zxcvbnm",
+        "0123456789",
+        "!@#$%^&*",
+    ];
+
+    let mut penalty = 0.0f64;
+    for seq in &sequences {
+        // Forward sequences of length >= 3
+        if seq.len() >= 3 {
+            for i in 0..=seq.len().saturating_sub(3) {
+                let sub = &seq[i..i + 3];
+                if lower.contains(sub) {
+                    penalty += 5.0;
+                }
+            }
+        }
+        // Reversed sequences
+        let reversed: String = seq.chars().rev().collect();
+        if reversed.len() >= 3 {
+            for i in 0..=reversed.len().saturating_sub(3) {
+                let sub = &reversed[i..i + 3];
+                if lower.contains(sub) {
+                    penalty += 5.0;
+                }
+            }
+        }
+    }
+    penalty
+}
+
+/// Penalize common passwords (subset of top 100).
+fn common_password_penalty(password: &str) -> f64 {
+    let lower = password.to_lowercase();
+    let common = [
+        "password", "pass", "123456", "12345678", "qwerty", "abc123", "monkey",
+        "1234567", "letmein", "trustno1", "dragon", "baseball", "iloveyou",
+        "master", "sunshine", "ashley", "michael", "shadow", "123123", "654321",
+        "superman", "qazwsx", "football", "password1", "password123", "admin",
+        "welcome", "hello", "freedom", "whatever", "hunter2", "password!",
+        "p@ssw0rd", "p@ssword",
+    ];
+
+    for cp in &common {
+        if lower == *cp || lower.starts_with(cp) {
+            return 40.0;
+        }
+    }
+    0.0
 }
 
 fn preview_output_name(mode: Mode, path: &Path) -> String {

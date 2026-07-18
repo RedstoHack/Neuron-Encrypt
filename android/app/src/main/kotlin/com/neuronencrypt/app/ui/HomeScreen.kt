@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -21,7 +22,63 @@ fun HomeScreen(
     onBatch: () -> Unit,
     onAbout: () -> Unit
 ) {
+    val context = LocalContext.current
     var showAbout by remember { mutableStateOf(false) }
+
+    // First-run onboarding: warn about passphrase irrecoverability.
+    // Stored in SharedPreferences so it only shows once per install.
+    val prefs = remember { context.getSharedPreferences("neuron_encrypt_prefs", android.content.Context.MODE_PRIVATE) }
+    var showOnboarding by remember { mutableStateOf(!prefs.getBoolean("onboarding_seen", false)) }
+
+    if (showOnboarding) {
+        AlertDialog(
+            onDismissRequest = { },
+            containerColor = Surface,
+            title = {
+                Text("Before you begin", color = TextHi, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text(
+                        "Neuron Encrypt uses a passphrase to encrypt your files. " +
+                        "There is no password recovery, no backdoor, and no way to " +
+                        "reset a forgotten passphrase.",
+                        color = TextMed,
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "If you forget your passphrase, your encrypted files are " +
+                        "permanently unrecoverable. This is a security feature — " +
+                        "a backdoor that lets you in would also let an attacker in.",
+                        color = TextMed,
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "• Use a passphrase you can remember\n" +
+                        "• Store it in a password manager\n" +
+                        "• Write it down somewhere safe offline\n" +
+                        "• Test with a non-critical file first",
+                        color = TextHi,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        prefs.edit().putBoolean("onboarding_seen", true).apply()
+                        showOnboarding = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                ) {
+                    Text("I understand", color = TextHi)
+                }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
