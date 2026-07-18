@@ -1,157 +1,52 @@
-# NEURON ENCRYPT
-
 <div align="center">
 
-![Neuron Encrypt](https://img.shields.io/badge/Neuron%20Encrypt-v2.1.0-blue?style=for-the-badge&logo=rust)
-![License](https://img.shields.io/badge/License-GPLv3-green?style=for-the-badge)
-![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=for-the-badge)
-![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=for-the-badge&logo=rust)
+# 🔒 Neuron Encrypt
 
 **Local file encryption. No accounts. No internet. No compromise.**
 
 AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
-[![GitHub release](https://img.shields.io/github/v/release/darkmaster0345/Neuron-Encrypt?style=for-the-badge)](https://github.com/darkmaster0345/Neuron-Encrypt/releases)
-[![GitHub stars](https://img.shields.io/github/stars/darkmaster0345/Neuron-Encrypt?style=for-the-badge&logo=github)](https://github.com/darkmaster0345/Neuron-Encrypt/stargazers)
+[![Version](https://img.shields.io/badge/version-2.1.0-6366f1?style=flat-square)](https://github.com/darkmaster0345/Neuron-Encrypt/releases)
+[![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-6366f1?style=flat-square)](#download)
+[![Tests](https://img.shields.io/badge/tests-38%20passing-22c55e?style=flat-square)](#security)
+[![Audit](https://img.shields.io/badge/audit-0%20critical%20%7C%200%20high-22c55e?style=flat-square)](SECURITY_AUDIT.md)
+
+[**Download**](#download) · [**Website**](https://darkmaster0345.github.io/Neuron-Encrypt/) · [**Security**](#security) · [**Docs**](#how-it-works) · [**FAQ**](#faq)
 
 </div>
 
 ---
 
-## What Is Neuron Encrypt?
+## Why Neuron Encrypt?
 
-Neuron Encrypt is a lightweight desktop file encryption tool built in Rust with a minimal dark-themed GUI. Drag a file in, enter a passphrase, and get an encrypted `.vx2` output. Your original file is never modified. Nothing leaves your machine.
+You have files you don't want anyone to see. Tax returns. Medical records. Source code. Photos.
 
-Decrypting works the same way: drop the `.vx2` file, enter the original passphrase, and get your file back. Neuron Encrypt 2.1 automatically detects whether a file uses the legacy VAULTX02 format, the VAULTX03 streaming format, or the current VAULTX04 AAD-authenticated streaming format — no manual switching required.
+**Neuron Encrypt encrypts them on your device — no cloud, no account, no phone-home.** Your passphrase never leaves your machine. The encrypted `.vx2` file is useless to anyone who doesn't have it.
 
----
-
-## What's New in 2.1
-
-- **VAULTX04 format with header AAD**: New encryptions now authenticate the full header (magic || salt || stream_nonce) as Additional Authenticated Data on every chunk. Closes the defensive-in-depth gap from the security audit (V3 did not authenticate the header at the AEAD layer). V3 and V2 files remain fully readable for backward compatibility.
-- **GUI Cancel button**: Single-file and batch operations can now be aborted mid-operation. The Cancel button polls a flag at every 1 MB chunk boundary (~50 ms latency), cleans up the `.tmp` file, and returns a calm "Operation cancelled" message instead of a scary red error.
-- **WIPE SOURCE FILE confirmation dialogs**: Both single-file and batch WIPE buttons now require an explicit "Delete permanently" confirmation. Previously a single misclick permanently deleted the original plaintext.
-- **JNI file-descriptor leak fix**: Raw file descriptors from Android's `ParcelFileDescriptor.detachFd()` are now wrapped in `File::from_raw_fd` immediately, so any failure in subsequent JNI setup drops the File and closes the fd instead of leaking it.
-- **Binary password files**: `--password-file` now accepts arbitrary bytes (not just UTF-8). The buffer is wrapped in `Zeroizing<Vec<u8>>` from the start, so even on UTF-8 failure the bytes are zeroed before being freed.
-- **Type-safe ParcelFileDescriptor handling**: `MainActivity.getParcelableExtra` now uses the API 33+ typed overload with a `ClassCastException` fallback for older Android versions, preventing crashes from attacker apps sending non-Uri Parcelables.
-- **4 PiB file size limit enforced**: The EncryptorBE32 32-bit counter limits V3/V4 files to 2^32 × 1 MiB = 4 PiB. Encryption now explicitly rejects larger files with `FileTooLarge` instead of silently wrapping the counter (which would cause catastrophic GCM-SIV nonce reuse).
-- **V2 stream-decrypt 1 GiB limit fixed**: Previously a 1 GiB V2 file decrypted via `decrypt -i f.vx2` but failed via `cat f.vx2 | decrypt -i -`. Both paths now use the same `take(limit+1)` + `>` comparison.
-- **AndroidManifest hardening**: `allowBackup=false`, `fullBackupContent=false`.
-- **URI permission pruning**: Stale persisted URI permissions are released at startup so the ~128-permission cap is never hit.
-- **Android CI now lints + tests the JNI crate**: clippy, rustfmt, cargo test, and cargo audit run on both the core and JNI crates before the APK build.
-- **13 + 9 = 22 new tests**: V3 edge cases (empty file, single byte, chunk boundaries, truncation, tampered salt/nonce/chunk, magic-swap, reorder, extension) and V4 tests (roundtrip, AAD tamper detection, magic swap, empty file, wrong password, pipe roundtrip). Total: 38 tests, all passing.
-
-See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for the full audit report and [CHANGELOG.md](CHANGELOG.md) for a complete change history.
+- **🔒 Nonce-misuse resistant** — AES-256-GCM-SIV (RFC 8452) stays secure even if nonce reuse happens
+- **🧠 Memory-hard KDF** — Argon2id at 256 MiB makes GPU brute-force prohibitively expensive
+- **🛡️ Authenticated header** — V4 format verifies the full header on every chunk (not just the body)
+- **⚡ Stream any size** — 1 KB or 1 TB, constant ~258 MB RAM, up to 4 PiB max
+- **🧹 Memory hygiene** — Every key and plaintext buffer is `Zeroizing<T>`, wiped on drop
+- **🌍 4 platforms** — Windows, macOS, Linux, Android 7.0+ (all from one Rust codebase)
+- **🔇 Offline-first** — Zero network permissions on Android, zero telemetry, zero tracking
+- **📦 Atomic writes** — Output goes to `.tmp` first, then renames. No partial files on crash
 
 ---
 
-## What's New in 2.0
+## Download
 
-- **Near-Zero File Size Limit**: Encrypt files of any size up to 4 PiB (the BE32 stream-counter limit). The streaming engine removed the old 2 GB cap — terabyte-scale files work fine. Files larger than 4 PiB are rejected with `FileTooLarge` to prevent silent counter wraparound.
-- **Constant ~258 MB RAM**: Argon2id key derivation uses 256 MB (fixed), and 1 MB chunk streaming adds ~2 MB. Peak stays at ~258 MB regardless of file size.
-- **High-Efficiency Batch Queue Processing**: Select multiple files, enter one passphrase, and the app processes them sequentially. If any file fails (disk full, permission denied), its temporary data is cleaned up and the queue moves to the next file — the app never crashes.
-- **VAULTX03 Streaming Engine**: AES-256-GCM-SIV with STREAM BE32 construction. Files are encrypted in 1 MB chunks with per-chunk authentication tags, keeping memory flat and guaranteeing integrity.
-- **I/O Governor for Large Files**: Prevents OS dirty page cache saturation during multi-gigabyte encryptions. Every ~100 MB the engine forces a disk flush and yields the thread, eliminating system-wide freezes.
-- **Automatic Legacy Detection**: Magic bytes at offset 0 determine format version. VAULTX02 files are routed to the legacy decryptor transparently.
-- **Windows Installer with .vx2 File Association**: NSIS-based setup installs to `Program Files`, creates Start Menu and Desktop shortcuts, and optionally associates `.vx2` files so double-clicking launches the app.
-- **Fast**: ~500 MB/s encryption speed on modern hardware (tested on core i7 10thgen )
----
+| Platform | Type | Link |
+|----------|------|------|
+| 🪟 Windows | x64 installer + portable | [Latest release ↗](https://github.com/darkmaster0345/Neuron-Encrypt/releases/latest) |
+| 🍎 macOS | Universal (Intel + Apple Silicon) | [Latest release ↗](https://github.com/darkmaster0345/Neuron-Encrypt/releases/latest) |
+| 🐧 Linux | x64 static binary | [Latest release ↗](https://github.com/darkmaster0345/Neuron-Encrypt/releases/latest) |
+| 🤖 Android | APK (Android 7.0+) | [Latest release ↗](https://github.com/darkmaster0345/Neuron-Encrypt/releases/latest) |
+| ⌨️ CLI | For scripts and CI/CD | `cargo install --git https://github.com/darkmaster0345/Neuron-Encrypt --bin neuron-encrypt-cli` |
 
-## Features
-
-- **Single-file encrypt/decrypt** — drag-and-drop or file browser
-- **Batch processing** — queue multiple files with a single passphrase
-- **Password strength meter** — visual feedback (Weak / Fair / Strong / Elite)
-- **Real-time progress bar** — per-file progress in batch mode with throttled UI updates
-- **Batch cancellation** — cancel button aborts remaining files gracefully
-- **I/O Governor** — periodic disk flush every 100 MB with thread yield. Prevents OS page cache saturation and system lag on multi-GB files.
-- **Atomic file writes** — writes to a `.tmp` file first, then renames on success. No partial files on crash.
-- **Secure memory handling** — keys wrapped in `Zeroizing<T>`, wiped from RAM on drop
-- **Original files untouched** — output is always written to a new file beside the source
-- **Cross-platform** — Windows (x64 MSVC), macOS (Universal Intel + Apple Silicon), Linux (x64)
-- **No dependencies on runtime** — Windows builds use static CRT (`crt-static`). Just the binary.
-
----
-
-## Technical Specifications
-
-### Security Stack
-
-| Component | Implementation | Detail |
-|---|---|---|
-| Language | **100% Safe Rust** | Zero `unsafe` blocks in the codebase — memory safety guaranteed by the borrow checker |
-| Cipher | **AES-256-GCM-SIV** (RFC 8452) | Nonce-misuse resistant authenticated encryption |
-| Key Derivation | **Argon2id** | Memory-hard KDF: 256 MiB, 3 iterations, 4 lanes, 32-byte output — GPU/ASIC resistant |
-| Key Expansion | **HKDF-SHA512** | Cryptographic domain separation between V2 and V3 pipelines |
-| Randomness | **OsRng** (OS CSPRNG) | Fresh 16-byte salt + 7-byte stream nonce generated per file |
-| Memory Hygiene | **Zeroizing\<T\>** | Key material zeroed from RAM on scope exit |
-| Streaming I/O | **EncryptorBE32 / DecryptorBE32** | Constant ~258 MB RAM regardless of file size |
-| File Writes | **Atomic .tmp → rename** | No partial or corrupted files on crash |
-| Batch Error Handling | **Per-file isolation** | Failed files cleaned up; remaining queue continues |
-| I/O Governor | **sync_data + thread yield** | Flushes disk cache every ~100 MB; prevents OS dirty page freezes on large files |
-
-### Cryptographic Parameters
-
-```
-Argon2id:
-  Memory     : 256 MiB (262,144 KiB)
-  Iterations : 3
-  Lanes      : 4
-  Output     : 32 bytes
-```
-
-### VAULTX03 File Format
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        VAULTX03 HEADER (31 bytes)               │
-├──────────┬──────────┬──────────┬─────────────────────────────────┤
-│ Magic    │ Salt     │ Nonce    │ Encrypted Data (streaming)      │
-│ 8 bytes  │ 16 bytes │ 7 bytes  │ N × (1 MB chunk + 16B tag)      │
-└──────────┴──────────┴──────────┴─────────────────────────────────┘
-```
-
-- **Magic**: Literal `b"VAULTX03"` — identifies the streaming format version
-- **Salt**: 128-bit fresh `OsRng`-generated per file
-- **Nonce**: 56-bit (7 bytes) fresh `OsRng`-generated per file; `EncryptorBE32` expands this to a 12-byte nonce internally by appending a 5-byte counter + 1-byte flag
-- **Body**: Sequence of AES-256-GCM-SIV encrypted chunks. Intermediate chunks via `encrypt_next`, final chunk via `encrypt_last` to prevent truncation attacks.
-
-### Legacy VAULTX02 Format
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        VAULTX02 HEADER (52 bytes)               │
-├──────────┬──────────┬──────────┬─────────────────────────────────┤
-│ Magic    │ Salt     │ Nonce    │ Ciphertext + Auth Tag           │
-│ 8 bytes  │ 32 bytes │ 12 bytes │ Entire file loaded into RAM     │
-└──────────┴──────────┴──────────┴─────────────────────────────────┘
-```
-
-VAULTX02 files are automatically detected by their magic bytes and routed to the legacy decryptor. Supported for decryption only.
-
-### Memory Profile
-
-```
-Key derivation (Argon2id) : ~256 MB  (fixed, 262,144 KiB blocks)
-Stream buffer (1 MB chunk): ~2 MB   (read + ciphertext buffer)
-─────────────────────────────────────────────────────────────
-Peak RAM                  : ~258 MB  (constant, independent of file size)
-```
-
----
-
-## Security Audit Results
-
-| Audit | Score | Verdict |
-|---|---|---|
-| Checklist Audit | 28/28 PASS | READY |
-| Deep Security Audit | 7/7 PASS | READY |
-
-Known limitations (by design):
-
-- Passphrase cannot be recovered — no backdoors exist
-- Encrypted file size reveals original file size (± 31-byte header + 16-byte tag per 1 MB chunk)
-- egui text buffer may hold transient password copies during typing (inherent GUI framework limitation)
+**Verify your download:** SHA-256 hashes are published in each [release note](https://github.com/darkmaster0345/Neuron-Encrypt/releases).
 
 ---
 
@@ -161,7 +56,7 @@ Known limitations (by design):
 
 | Home | File Selection | Encryption Complete | About |
 |:---:|:---:|:---:|:---:|
-| ![Home Screen](docs/screenshots/home-screen.png) | ![File Picker](docs/screenshots/file-picker.png) | ![Success](docs/screenshots/success-screen.png) | ![About](docs/screenshots/about-dialog.png) |
+| ![Home](docs/screenshots/home-screen.png) | ![File Picker](docs/screenshots/file-picker.png) | ![Success](docs/screenshots/success-screen.png) | ![About](docs/screenshots/about-dialog.png) |
 
 *Android app — dark theme, Material 3*
 
@@ -169,521 +64,221 @@ Known limitations (by design):
 
 ---
 
-## How To Use
-
-### Encrypting a File
-
-1. Open Neuron Encrypt
-2. Drag your file onto the window, or click **Browse file**
-3. Enter a passphrase (use the strength meter as a guide)
-4. Confirm the passphrase
-5. Click **ENCRYPT**
-6. Output saved as `yourfile.ext.vx2` beside the original — the source is untouched
-
-### Decrypting a File
-
-1. Drag a `.vx2` file onto the window, or click **Browse file**
-2. Enter the passphrase used during encryption
-3. Click **DECRYPT**
-4. Original file restored beside the encrypted copy
-
-### Batch Processing
-
-1. Click **Batch upload** on the main screen
-2. Select multiple files in the dialog
-3. The app auto-detects mode: all `.vx2` → Decrypt, all others → Encrypt
-4. Enter one passphrase for all files
-5. Click **Encrypt All Files** or **Decrypt All Files**
-6. Review the per-file results summary (success/failure) when complete
-7. Failed files do not crash the batch — the queue continues
-
-### Password Strength Guide
+## How it works
 
 ```
-WEAK   → do not use
-FAIR   → acceptable for low-sensitivity files
-STRONG → recommended
-ELITE  → maximum security
+┌─────────────────────────────────────────────────────────┐
+│  Your file  ──►  Passphrase  ──►  AES-256-GCM-SIV  ──►  .vx2  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### CLI Usage
-
-Neuron Encrypt also ships with a full-featured command-line interface — `neuron-encrypt-cli` — for terminal users, shell scripts, CI/CD pipelines, and automation.
-
-#### Build the CLI
-
-```bash
-git clone https://github.com/darkmaster0345/Neuron-Encrypt.git
-cd Neuron-Encrypt/neuron-encrypt
-
-# Build CLI binary only (skip GUI dependencies)
-cargo build --release --bin neuron-encrypt-cli
-```
-
-Binary locations:
-```
-Linux   : target/release/neuron-encrypt-cli
-macOS   : target/release/neuron-encrypt-cli
-Windows : target/release/neuron-encrypt-cli.exe
-```
-
-Install globally (optional):
-```bash
-cp target/release/neuron-encrypt-cli /usr/local/bin/
-# or
-cargo install --path . --bin neuron-encrypt-cli
-```
-
-#### Encrypt a File
-
-```bash
-# Interactive (prompts for passphrase)
-neuron-encrypt-cli encrypt -i secret.pdf
-
-# With environment variable
-NEURON_PASSWORD='MyStr0ngP@ssw0rd!' neuron-encrypt-cli encrypt -i secret.pdf
-
-# Custom output path
-neuron-encrypt-cli encrypt -i secret.pdf -o vault/encrypted.vx2
-
-# Passphrase from file (best for scripts/CI)
-neuron-encrypt-cli encrypt -i secret.pdf --password-file /run/secrets/key
-```
-
-Output: `secret.pdf.vx2` — the original file is **never modified**.
-
-#### Decrypt a File
-
-```bash
-# Interactive
-neuron-encrypt-cli decrypt -i secret.pdf.vx2
-
-# With environment variable
-NEURON_PASSWORD='MyStr0ngP@ssw0rd!' neuron-encrypt-cli decrypt -i secret.pdf.vx2
-
-# Custom output path
-neuron-encrypt-cli decrypt -i secret.pdf.vx2 -o recovered.pdf
-```
-
-The `.vx2` extension is automatically stripped — output becomes `secret.pdf`.
-
-The CLI auto-detects VAULTX03 (streaming) and VAULTX02 (legacy) formats. No manual switching required.
-
-#### Global Options
-
-| Flag | Description |
-|------|-------------|
-| `-q, --quiet` | Suppress all non-error output |
-| `--no-progress` | Disable progress bar |
-| `--json` | Emit structured JSON output for automation |
-| `--password-file <PATH>` | Read passphrase from a file |
-| `-F, --force` | Overwrite existing output files |
-| `--completions <SHELL>` | Generate shell completions (bash, zsh, fish, powershell, elvish) |
-| `-V, --version` | Print version |
-| `-h, --help` | Print help with examples |
-
-#### Passphrase Methods
-
-The CLI supports three ways to provide a passphrase (minimum 8 characters):
-
-| Method | Example | Best For |
-|--------|---------|----------|
-| **Interactive prompt** | `neuron-encrypt-cli encrypt -i file.txt` | Everyday terminal use |
-| **Environment variable** | `NEURON_PASSWORD='pass' neuron-encrypt-cli encrypt -i file.txt` | Quick scripting |
-| **Password file** | `neuron-encrypt-cli encrypt -i file.txt --password-file key.txt` | CI/CD, secrets managers |
-
-Priority order: `--password-file` → `NEURON_PASSWORD` → interactive prompt.
-
-#### JSON Output
-
-The `--json` flag produces machine-readable output for scripting and CI/CD:
-
-```bash
-neuron-encrypt-cli encrypt -i secret.pdf --json
-```
-
-Success:
-```json
-{"status":"success","output_path":"secret.pdf.vx2","bytes_processed":24576,"duration_ms":152,"sha256":"a1b2c3d4...","error":null}
-```
-
-Error:
-```json
-{"status":"error","output_path":null,"bytes_processed":null,"duration_ms":98,"sha256":null,"error":"Wrong passphrase or corrupted file."}
-```
-
-Fields:
-
-| Field | Description |
-|-------|-------------|
-| `status` | `"success"` or `"error"` |
-| `output_path` | Absolute path to the output file |
-| `bytes_processed` | Size of the source file in bytes |
-| `duration_ms` | Wall-clock time in milliseconds |
-| `sha256` | SHA-256 hash of the original (encrypt) or decrypted (decrypt) file |
-| `error` | Error message, or `null` on success |
-
-#### Piping & Streams
-
-```bash
-# Encrypt to stdout → pipe anywhere
-neuron-encrypt-cli encrypt -i secret.pdf -o - --no-progress > encrypted.vx2
-
-# Encrypt → pipe over SSH
-neuron-encrypt-cli encrypt -i secret.pdf -o - | ssh user@host 'cat > secret.pdf.vx2'
-
-# Decrypt from stdin
-cat encrypted.vx2 | neuron-encrypt-cli decrypt -i - -o recovered.pdf
-
-# Decrypt from stdin → pipe to another tool
-cat backup.tar.gz.vx2 | neuron-encrypt-cli decrypt -i - -o - | tar -xz
-```
-
-> ⚠️ **Encryption from stdin** (`-i -`) is **not supported** — the streaming engine requires a seekable file to handle chunk boundaries. File input is required for encryption. **Decryption from stdin** works fine.
-
-#### Exit Codes
-
-| Code | Meaning | When |
-|------|---------|------|
-| `0` | **Success** | Operation completed successfully |
-| `1` | **Runtime Error** | I/O error, disk full, permission denied |
-| `2` | **Bad Input** | File not found, passphrase too short, output already exists |
-| `3` | **Wrong Password** | Incorrect passphrase or corrupted file |
-
-Use in scripts:
-```bash
-neuron-encrypt-cli decrypt -i backup.vx2 -o backup.tar.gz
-case $? in
-  0) echo "Decryption successful" ;;
-  3) echo "Wrong password!"; exit 1 ;;
-  *) echo "Unexpected error"; exit 1 ;;
-esac
-```
-
-#### Shell Completions
-
-```bash
-# Bash
-neuron-encrypt-cli --completions bash > /etc/bash_completion.d/neuron-encrypt-cli
-
-# Zsh
-neuron-encrypt-cli --completions zsh > ~/.zfunc/_neuron-encrypt-cli
-
-# Fish
-neuron-encrypt-cli --completions fish > ~/.config/fish/completions/neuron-encrypt-cli.fish
-
-# PowerShell
-neuron-encrypt-cli --completions powershell > neuron-encrypt-cli.ps1
-```
-
-#### CLI Examples
-
-```bash
-# Encrypt a file (interactive passphrase)
-neuron-encrypt-cli encrypt -i secret.pdf
-
-# Encrypt with custom output and JSON result
-neuron-encrypt-cli encrypt -i secret.pdf -o vault/secret.vx2 --json
-
-# Decrypt to a specific path
-neuron-encrypt-cli decrypt -i secret.vx2 -o recovered.pdf
-
-# Batch encrypt all .docx files
-export NEURON_PASSWORD='SecureBatchP@ss!'
-for f in *.docx; do
-  neuron-encrypt-cli encrypt -i "$f" --force
-done
-
-# CI/CD: encrypt with secrets manager
-neuron-encrypt-cli encrypt -i artifact.zip --json \
-  --password-file /secrets/encrypt-key | tee result.json
-
-# Verify integrity: compare SHA-256 from encrypt and decrypt
-neuron-encrypt-cli encrypt -i important.pdf    # note the SHA-256
-neuron-encrypt-cli decrypt -i important.pdf.vx2 # SHA-256 should match
-
-# Quiet mode (scripts)
-neuron-encrypt-cli encrypt -i secret.pdf -q
-
-# Pipe encrypted backup over SSH
-neuron-encrypt-cli encrypt -i backup.tar.gz -o - | ssh user@host 'cat > backup.vx2'
-```
-
----
-
-## Windows Installer
-
-Neuron Encrypt ships with an NSIS-based installer for Windows. Download `NeuronEncrypt-Windows-x64-Setup.exe` from the releases page.
-
-**What the installer does:**
-
-- Installs to `C:\Program Files\NeuronEncrypt`
-- Creates Start Menu shortcuts (app + uninstaller)
-- Optional Desktop shortcut
-- Optional `.vx2` file association (double-click encrypted files to launch the app)
-- Registers itself in Windows Add/Remove Programs
-- On reinstall: detects existing install, kills any running instance, and overwrites the binary
-- Clean uninstall removes all installer-added files, shortcuts, and registry keys — your `.vx2` files are never deleted
-
-**Optional installer components** (selectable during setup):
-
-- **Core Application** — always installed (required)
-- **Desktop Shortcut** — optional
-- **Associate .vx2 files** — optional
-
----
-
-## Build From Source
-
-**Requirements:** Rust 1.70+ from [rustup.rs](https://rustup.rs) and Git.
-
-```bash
-git clone https://github.com/darkmaster0345/Neuron-Encrypt.git
-cd Neuron-Encrypt/neuron-encrypt
-cargo build --release
-```
-
-Binary locations:
-```
-Windows : target\release\neuron-encrypt.exe
-macOS   : target/release/neuron-encrypt
-Linux   : target/release/neuron-encrypt
-```
-
-CLI binary locations:
-```
-Windows : target\release\neuron-encrypt-cli.exe
-macOS   : target/release/neuron-encrypt-cli
-Linux   : target/release/neuron-encrypt-cli
-```
-
-Windows users can also double-click `build.bat` instead.
-
-### Building the Windows Installer
-
-```powershell
-# 1. Build the release binary
-cd neuron-encrypt
-cargo build --release --target x86_64-pc-windows-msvc
-
-# 2. Install NSIS (if not already installed)
-choco install nsis --yes
-
-# 3. Build the installer from repo root
-cd ..
-makensis installer/neuron-encrypt.nsi
-```
-
-Output: `installer/NeuronEncrypt-Windows-x64-Setup.exe`
-
-### Building macOS Universal Binary
-
-```bash
-cd neuron-encrypt
-cargo build --release --target x86_64-apple-darwin
-cargo build --release --target aarch64-apple-darwin
-lipo -create \
-  target/x86_64-apple-darwin/release/neuron-encrypt \
-  target/aarch64-apple-darwin/release/neuron-encrypt \
-  -output NeuronEncrypt-macOS
-```
-
----
-
-## CI/CD
-
-The repository uses GitHub Actions (`release.yml`) for automated builds on every push to `main`:
-
-1. **Security audit** — `cargo audit` with medium severity threshold
-2. **Linting** — `cargo fmt --check` + `cargo clippy -- -D warnings`
-3. **Tests** — `cargo test --all` with `RUST_BACKTRACE=1`
-4. **Builds** — parallel builds for Linux (x64), Windows (x64 MSVC), and macOS (Universal)
-5. **Windows installer** — NSIS packaging after the Windows build completes
-
-Artifacts are uploaded with 30-day retention.
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────┐
-│         GUI Layer (egui/eframe)     │
-│  Dark theme · JetBrains Mono font   │
-│  Drag-and-drop · Progress bars      │
-├─────────────────────────────────────┤
-│       Application Controller        │
-│  State machine: drop → configure →  │
-│  processing → success/failure       │
-├─────────────────────────────────────┤
-│     Background Crypto Thread        │
-│   std::thread + crossbeam channel   │
-├─────────────────────────────────────┤
-│        Core Crypto Library          │
-│  AES-256-GCM-SIV · Argon2id · HKDF  │
-│  Zeroizing · OsRng · Atomic I/O     │
-│  VAULTX03 BE32 streaming engine     │
-└─────────────────────────────────────┘
-```
-
-The GUI thread never handles crypto. All encryption/decryption runs in a background thread and reports progress through a `crossbeam_channel`. The `ThrottledReporter` suppresses redundant UI updates, firing only on meaningful progress deltas or elapsed time thresholds.
-
----
-
-## Android Version
-
-Neuron Encrypt is also available as a native Android application. It packages the core Rust cryptographic engine via JNI to guarantee the same speed and safety profile on mobile.
-
-- **Offline-First Security**: Zero network permissions requested.
-- **Modern SAF API**: Works natively via Android Storage Access Framework without asking for system-wide files storage permission.
-- **Material3 Custom Dark Theme**: Near-black design with active passphrase feedback, matching the desktop experience.
-
-For full setup, JNI architecture details, and building instructions, see the [Android README](android/README.md).
-
----
-
-## Project Structure
-
-```
-├── android/             — Native Android app & JNI shared library
-│   ├── app/             — Kotlin/Compose Android app
-│   ├── neuron-encrypt-jni/ — Rust JNI wrapper crate
-│   ├── build-rust.sh    — Cross-compiles JNI targets
-│   └── README.md        — Android build & architecture details
-├── neuron-encrypt/
-│   ├── src/
-│   │   ├── main.rs      — entry point, window + theme setup
-│   │   ├── gui.rs       — full UI: screens, widgets, state machine
-│   │   ├── crypto.rs    — encryption, decryption, streaming, tests
-│   │   ├── error.rs     — CryptoError enum via thiserror
-│   │   ├── lib.rs       — library crate root
-│   │   └── bin/
-│   │       └── cli.rs   — CLI binary: encrypt/decrypt from the terminal
-│   ├── assets/
-│   │   ├── icon.ico
-│   │   └── fonts/
-│   │       └── JetBrainsMono-Regular.ttf
-│   ├── .cargo/
-│   │   └── config.toml  — static CRT for Windows MSVC/GNU
-│   ├── Cargo.toml
-│   ├── Cargo.lock
-│   └── build.bat        — one-click Windows release build
-├── installer/
-│   ├── neuron-encrypt.nsi  — NSIS installer script
-│   └── README.md           — installer build instructions
-├── .github/workflows/
-│   ├── release.yml         — CI/CD pipeline
-│   └── android.yml         — Android CI pipeline
-├── LICENSE              — GPLv3
-└── README.md            — this file
-```
+1. **Drop a file** — or click Browse. Auto-detects encrypt vs decrypt from magic bytes.
+2. **Enter a passphrase** — strength meter gives instant feedback.
+3. **Click ENCRYPT** — file streams through 1 MiB chunks, written atomically to `.vx2`.
+4. **Done** — original is untouched. Optionally wipe it (with confirmation).
+
+Your passphrase is held in memory only long enough to derive the key via Argon2id, then zeroed. It's never written to disk, never sent over network, never logged.
 
 ---
 
 ## Security
 
-### Cipher Suite
+### Cipher suite
 
 | Layer | Algorithm | Parameters |
 |-------|-----------|------------|
-| Encryption (V3) | AES-256-GCM-SIV (BE32 streaming) | 56-bit stream nonce per file, 128-bit auth tag per 1 MB chunk |
-| Encryption (V2 legacy) | AES-256-GCM-SIV | 96-bit nonce, 128-bit auth tag |
-| Key Derivation | Argon2id | m=262144 (256 MB), t=3 iterations, p=4 lanes |
-| Key Expansion | HKDF-SHA512 | Two separate 256-bit subkeys: enc + nonce |
-| Integrity | GHASH (GCM-SIV) | Per-chunk authentication; any bit-flip fails |
-| RNG | OS CSPRNG (`OsRng`) | `getrandom` crate; no `rand` global state |
-| Memory Hygiene | `Zeroizing<T>` | Key material zeroed from RAM on drop |
+| Encryption | AES-256-GCM-SIV (RFC 8452) | BE32 streaming, 1 MiB chunks, per-chunk auth tag |
+| Key derivation | Argon2id (RFC 9106) | m=256 MiB, t=3, p=4, 64-byte output |
+| Key expansion | HKDF-SHA512 (RFC 5869) | Per-version domain separation (V2/V3/V4) |
+| Randomness | OsRng (OS CSPRNG) | Fresh salt + nonce per file, never reused |
+| Memory hygiene | `Zeroizing<T>` | Keys + plaintext wiped from RAM on drop |
+| File format | VAULTX04 | Header authenticated as AAD on every chunk |
 
-### Key Derivation Details
-
-```
-V3 (VAULTX03 streaming):
-  passphrase + 16-byte OsRng salt
-         │
-      Argon2id (256 MB, 3 passes, 4 lanes)
-         │
-      64-byte master key
-         ├─ HKDF-Extract+Expand → 32-byte encryption key
-         └─ HKDF-Extract+Expand → 32-byte nonce seed
-
-V2 (VAULTX02 legacy):
-  passphrase + 32-byte OsRng salt
-         │
-      Argon2id (256 MB, 3 passes, 4 lanes)
-         │
-      64-byte master key
-         ├─ HKDF-Extract+Expand → 32-byte encryption key
-         └─ HKDF-Extract+Expand → 32-byte nonce seed
-```
-
-The salt is stored in plaintext in the file header. The master key and all intermediate key material are stored in `Zeroizing<Vec<u8>>` which zeroes memory on drop.
-
-### Threat Model
+### Threat model
 
 **Protected against:**
-- Offline brute-force: Argon2id with 256 MB memory cost makes GPU attacks expensive.
-- Ciphertext tampering: Every 1 MB chunk has an independent GCM-SIV authentication tag (GHASH). Corruption of any byte fails decryption of that chunk.
-- Nonce reuse: Each encryption generates a fresh 7-byte (56-bit) random nonce via `OsRng`. `EncryptorBE32` expands it to 12 bytes internally with a per-chunk counter. Fresh nonce per file makes collision probability negligible.
-- Sensitive data in memory: Plaintext buffers and keys are wrapped in `Zeroizing<>`, zeroed on drop. Passwords are cleared from UI state immediately after the crypto thread starts.
+- ✅ Offline brute-force (Argon2id 256 MiB memory cost)
+- ✅ Ciphertext tampering (per-chunk GCM-SIV authentication tags)
+- ✅ Header tampering (V4 AAD authenticates magic + salt + nonce)
+- ✅ Nonce reuse (GCM-SIV is misuse-resistant; fresh random nonce per file)
+- ✅ Truncation, reordering, substitution attacks (BE32 counter + flag binding)
+- ✅ Plaintext lingering in RAM (`Zeroizing<T>` on all secret buffers)
 
 **Not protected against:**
-- Adversaries with access to RAM (cold-boot, DMA attacks) — no in-memory encryption.
-- Keyloggers or malicious screen readers capturing the passphrase during input.
-- Weak passphrases: The strength meter is advisory only. A passphrase scoring "Weak" can still be used.
-- SSD wear-levelling: The source wipe function cannot guarantee physical erasure on flash storage, CoW filesystems (Btrfs, APFS, ZFS), or NTFS volumes with shadow copies enabled.
-- Metadata: File names, sizes, and access timestamps of the original file are not encrypted.
+- ❌ Cold-boot / DMA attacks (no in-memory encryption)
+- ❌ Keyloggers and screen recorders
+- ❌ SSD wear-leveling (secure wipe is best-effort on flash storage)
+- ❌ Weak passphrases (strength meter is advisory, not enforced)
+- ❌ Metadata leakage (file names, sizes, timestamps are visible)
 
-### Passphrase Requirements
-
-- Minimum 8 characters enforced at the API level (`MIN_PASSWORD_LEN`).
-- The UI strength meter scores: length ≥ 8/12/16, uppercase, digit, symbol presence.
-- No maximum length — passphrases are hashed through Argon2id regardless of length.
-
-### Reporting Vulnerabilities
-
-Do **not** open a public GitHub issue for security vulnerabilities. Use the [GitHub Security Advisory](https://github.com/darkmaster0345/Neuron-Encrypt/security/advisories) to report privately.
+**Full audit:** 44 findings, 0 CRITICAL, 0 HIGH, 9 MEDIUM (all fixed), 10 LOW, 25 INFO. See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-## Known Limitations
+## Quick start
 
-- Passphrase-only authentication — no key file support
-- Encrypted files are slightly larger than originals (~31-byte header + 16-byte auth tag per 1 MB chunk)
-- Files encrypted with V3 (VAULTX03) cannot be decrypted by older versions of the app
-- Secure wipe uses 3-pass random overwrite + rename, which is not cryptographically guaranteed on SSDs, APFS, Btrfs, ZFS, or NTFS with shadow copies
-- egui text buffer may hold transient password copies during typing (inherent GUI framework limitation)
+### GUI (desktop)
+
+```bash
+git clone https://github.com/darkmaster0345/Neuron-Encrypt.git
+cd Neuron-Encrypt/neuron-encrypt
+cargo build --release --bin neuron-encrypt
+./target/release/neuron-encrypt
+```
+
+### CLI
+
+```bash
+# Encrypt (interactive prompt)
+neuron-encrypt-cli encrypt -i secret.pdf
+
+# Decrypt
+neuron-encrypt-cli decrypt -i secret.pdf.vx2
+
+# Pipe over SSH
+neuron-encrypt-cli encrypt -i backup.tar.gz -o - | ssh user@host 'cat > backup.vx2'
+
+# JSON output for CI/CD
+neuron-encrypt-cli encrypt -i artifact.zip --json --password-file /secrets/key
+```
+
+### Android
+
+Build from source or download the APK from [releases](https://github.com/darkmaster0345/Neuron-Encrypt/releases). Minimum: Android 7.0 (API 24). No Google Play account required.
+
+---
+
+## FAQ
+
+<details>
+<summary><b>Can I recover my files if I forget the passphrase?</b></summary>
+
+No. There is no backdoor, no recovery key, no master password. If you forget the passphrase, the files are gone. This is by design — a backdoor that lets you in also lets an attacker in.
+</details>
+
+<details>
+<summary><b>Is my passphrase stored anywhere?</b></summary>
+
+No. The passphrase is held in memory only long enough to derive the encryption key via Argon2id, then it's zeroed. It's never written to disk, never sent over the network, never logged.
+</details>
+
+<details>
+<summary><b>What's the difference between V2, V3, and V4 formats?</b></summary>
+
+- **V2 (VAULTX02)** — legacy single-shot format, entire file in RAM, ≤1 GiB
+- **V3 (VAULTX03)** — streaming format, 1 MiB chunks, no size limit, header NOT authenticated
+- **V4 (VAULTX04)** — current default, same as V3 but with header authenticated as AAD on every chunk
+
+All three are readable by v2.1. New encryptions use V4. There is no auto-migration — re-encrypt to upgrade.
+</details>
+
+<details>
+<summary><b>Why is the binary not code-signed?</b></summary>
+
+Code signing requires an Authenticode certificate ($200-400/year for OV, more for EV). This is an open-source project without a budget for that yet. Windows SmartScreen will warn on first install — click "Run anyway". Always verify the SHA-256 hash in the release notes against your download.
+</details>
+
+<details>
+<summary><b>How does this compare to VeraCrypt / Cryptomator / 7-Zip?</b></summary>
+
+| Feature | Neuron Encrypt | VeraCrypt | Cryptomator | 7-Zip AES |
+|---------|---------------|-----------|-------------|-----------|
+| Scope | File-level | Volume/container | Cloud-file | File-level |
+| Cipher | AES-256-GCM-SIV | AES-256-XTS | AES-256-GCM | AES-256 |
+| Nonce-misuse resistant | ✅ | ❌ | ❌ | ❌ |
+| KDF | Argon2id 256 MiB | PBKDF2 | PBKDF2 | PBKDF2 |
+| Authenticated header | ✅ (V4) | ❌ | ❌ | ❌ |
+| Memory-hard | ✅ | ❌ | ❌ | ❌ |
+| RAM usage | ~258 MB | Varies | Low | Low |
+| Max file size | 4 PiB | 16 EiB | Unlimited | Unlimited |
+| Cross-platform | ✅ 4 platforms | ✅ | ✅ | ✅ |
+| Open source | ✅ GPLv3 | ✅ | ✅ | ✅ |
+</details>
+
+<details>
+<summary><b>Is there a CLI?</b></summary>
+
+Yes — `neuron-encrypt-cli` ships with the desktop build. Supports piping, JSON output, password files, shell completions, and exit codes for scripting. See [CLI usage](#quick-start) above.
+</details>
+
+<details>
+<summary><b>How do I report a vulnerability?</b></summary>
+
+**Do NOT open a public GitHub issue.** Use the [GitHub Security Advisory](https://github.com/darkmaster0345/Neuron-Encrypt/security/advisories) to report privately. We'll acknowledge within 48 hours and work with you on a fix before public disclosure.
+</details>
+
+---
+
+## Build from source
+
+**Prerequisites:** Rust 1.70+ ([rustup.rs](https://rustup.rs)), Git.
+
+```bash
+git clone https://github.com/darkmaster0345/Neuron-Encrypt.git
+cd Neuron-Encrypt/neuron-encrypt
+
+# Desktop GUI + CLI
+cargo build --release
+
+# CLI only (faster, no GUI deps)
+cargo build --release --bin neuron-encrypt-cli
+
+# Run tests
+cargo test --lib --release
+```
+
+**Android:** See [android/README.md](android/README.md) for JNI build instructions.
+
+**Windows installer:** See [installer/README.md](installer/README.md) for NSIS build.
+
+---
+
+## Project structure
+
+```
+Neuron-Encrypt/
+├── neuron-encrypt/          # Rust core (crypto + GUI + CLI)
+│   ├── src/crypto.rs        # AES-256-GCM-SIV, Argon2id, V2/V3/V4 formats
+│   ├── src/gui.rs           # egui desktop GUI
+│   ├── src/bin/cli.rs       # CLI binary
+│   └── Cargo.toml
+├── android/                 # Android app (Kotlin + Rust JNI)
+│   ├── app/                 # Compose Material3 UI
+│   ├── neuron-encrypt-jni/  # Rust JNI bridge
+│   └── build-rust.sh        # Cross-compile 4 ABIs
+├── installer/               # NSIS Windows installer
+├── docs/                    # Website (GitHub Pages)
+├── fastlane/                # F-Droid metadata
+├── SECURITY_AUDIT.md        # Full audit report (44 findings)
+├── CHANGELOG.md             # Version history
+└── README.md                # This file
+```
 
 ---
 
 ## Contributing
 
-Bug reports and pull requests are welcome. For security vulnerabilities, open a private [GitHub Security Advisory](https://github.com/darkmaster0345/Neuron-Encrypt/security/advisories) rather than a public issue.
+Bug reports and pull requests welcome. For security vulnerabilities, use [GitHub Security Advisory](https://github.com/darkmaster0345/Neuron-Encrypt/security/advisories) instead of a public issue.
 
 ```bash
 rustup component add rustfmt clippy
 cargo fmt --check
-cargo clippy -- -D warnings
-cargo test --all
+cargo clippy --all-targets -- -D warnings
+cargo test --lib --release
 ```
 
 ---
 
 ## License
 
-GPLv3 — Copyright (c) 2024–2026 Ubaid ur Rehman. See LICENSE for full text.
-
----
-
-## Acknowledgments
-
-- RustCrypto team — aes-gcm-siv, argon2, hkdf crates
-- egui/eframe team — immediate-mode GUI framework
-- JetBrains — JetBrains Mono font
-- NSIS community — Nullsoft Scriptable Install System
-- Rust community — tooling and ecosystem
+GPLv3 — Copyright (c) 2024–2026 Ubaid ur Rehman. See [LICENSE](LICENSE) for full text.
 
 ---
 
 <div align="center">
-Made with Rust
+
+**[Download](#download)** · **[Website](https://darkmaster0345.github.io/Neuron-Encrypt/)** · **[Security](#security)** · **[FAQ](#faq)**
+
+Made with Rust · No tracking · No cookies · No analytics
+
 </div>

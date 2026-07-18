@@ -1,23 +1,43 @@
-// Neuron Encrypt website — minimal interactivity.
+// Neuron Encrypt website — minimal vanilla JS.
 // No tracking, no analytics, no third-party scripts.
 
 (function () {
   'use strict';
 
-  // ── Smooth scroll for nav links (supplements CSS scroll-behavior) ──
+  // ── Nav scroll effect ──
+  const nav = document.getElementById('nav');
+  let lastScroll = 0;
+
+  function handleScroll() {
+    const scroll = window.scrollY;
+    if (scroll > 20) {
+      nav.classList.add('scrolled');
+    } else {
+      nav.classList.remove('scrolled');
+    }
+    lastScroll = scroll;
+  }
+
+  window.addEventListener('scroll', handleScroll, { passive: true });
+
+  // ── Smooth scroll for anchor links ──
   document.querySelectorAll('a[href^="#"]').forEach(function (link) {
     link.addEventListener('click', function (e) {
-      var target = document.querySelector(this.getAttribute('href'));
+      const href = this.getAttribute('href');
+      if (href === '#') return;
+      const target = document.querySelector(href);
       if (target) {
         e.preventDefault();
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const offset = 80; // nav height
+        const top = target.getBoundingClientRect().top + window.scrollY - offset;
+        window.scrollTo({ top: top, behavior: 'smooth' });
       }
     });
   });
 
-  // ── Scroll reveal — fades in sections as they enter the viewport ──
+  // ── Scroll reveal with IntersectionObserver ──
   if ('IntersectionObserver' in window) {
-    var observer = new IntersectionObserver(
+    const observer = new IntersectionObserver(
       function (entries) {
         entries.forEach(function (entry) {
           if (entry.isIntersecting) {
@@ -29,27 +49,41 @@
       { threshold: 0.1, rootMargin: '0px 0px -40px 0px' }
     );
 
-    // Mark sections for reveal (skip hero — it should be visible immediately)
-    document.querySelectorAll('.section, .feature, .download-card, .how-step').forEach(function (el, i) {
-      el.classList.add('reveal');
-      el.style.transitionDelay = (i % 4) * 60 + 'ms';
-      observer.observe(el);
+    // Mark elements for reveal (skip hero — visible immediately)
+    const revealSelectors = [
+      '.section-header',
+      '.feature-card',
+      '.download-card',
+      '.download-cli',
+      '.security-card',
+      '.audit-badge',
+      '.faq-list',
+      '.cta-content',
+      '.trust-bar'
+    ];
+
+    revealSelectors.forEach(function (sel) {
+      document.querySelectorAll(sel).forEach(function (el, i) {
+        el.classList.add('reveal');
+        el.style.transitionDelay = ((i % 4) * 60) + 'ms';
+        observer.observe(el);
+      });
     });
   }
 
-  // ── Active nav highlight based on scroll position ──
-  var navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
-  var sections = [];
+  // ── Active nav link based on scroll position ──
+  const navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
+  const sections = [];
   navLinks.forEach(function (link) {
-    var target = document.querySelector(link.getAttribute('href'));
+    const target = document.querySelector(link.getAttribute('href'));
     if (target) sections.push({ link: link, el: target });
   });
 
   if (sections.length > 0 && 'IntersectionObserver' in window) {
-    var navObserver = new IntersectionObserver(
+    const navObserver = new IntersectionObserver(
       function (entries) {
         entries.forEach(function (entry) {
-          var match = sections.find(function (s) { return s.el === entry.target; });
+          const match = sections.find(function (s) { return s.el === entry.target; });
           if (match) {
             if (entry.isIntersecting) {
               navLinks.forEach(function (l) { l.style.color = ''; });
@@ -63,16 +97,21 @@
     sections.forEach(function (s) { navObserver.observe(s.el); });
   }
 
-  // ── Console easter egg for the curious ──
+  // ── Console easter egg ──
   if (typeof console !== 'undefined' && console.log) {
-    console.log(
-      '%c🔒 Neuron Encrypt',
-      'color: #6366f1; font-size: 20px; font-weight: bold; font-family: monospace;'
-    );
+    const styles = [
+      'color: #6366f1',
+      'font-size: 24px',
+      'font-weight: bold',
+      'font-family: monospace',
+      'text-shadow: 2px 2px 0 rgba(99,102,241,0.3)'
+    ].join(';');
+
+    console.log('%c🔒 Neuron Encrypt', styles);
     console.log(
       '%cLocal file encryption. No accounts. No internet. No compromise.\n' +
       'Source: https://github.com/darkmaster0345/Neuron-Encrypt',
-      'color: #a8a8a8; font-family: monospace;'
+      'color: #a8a8a8; font-family: monospace; font-size: 12px;'
     );
   }
 })();
