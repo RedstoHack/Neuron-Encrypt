@@ -19,6 +19,14 @@ AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
 ---
 
+<div align="center">
+
+<img src="docs/screenshots/demo.gif" alt="Neuron Encrypt demo" width="280" />
+
+</div>
+
+---
+
 ## Why Neuron Encrypt?
 
 You have files you don't want anyone to see. Tax returns. Medical records. Source code. Photos.
@@ -54,9 +62,20 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 
 <div align="center">
 
-| Home | File Selection | Encryption Complete | About |
-|:---:|:---:|:---:|:---:|
-| ![Home](docs/screenshots/home-screen.png) | ![File Picker](docs/screenshots/file-picker.png) | ![Success](docs/screenshots/success-screen.png) | ![About](docs/screenshots/about-dialog.png) |
+<!-- Animated demo GIF — cycles through all 4 screens -->
+<img src="docs/screenshots/demo.gif" alt="Neuron Encrypt demo" width="300" />
+
+*Neuron Encrypt in action — Home → File Selection → Encryption Complete → About*
+
+<!-- Static screenshots with proper sizing via HTML img tags -->
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/thumbs/home.png" width="200" alt="Home Screen"/><br/><sub>Home</sub></td>
+    <td align="center"><img src="docs/screenshots/thumbs/picker.png" width="200" alt="File Picker"/><br/><sub>File Selection</sub></td>
+    <td align="center"><img src="docs/screenshots/thumbs/success.png" width="200" alt="Success"/><br/><sub>Encryption Complete</sub></td>
+    <td align="center"><img src="docs/screenshots/thumbs/about.png" width="200" alt="About"/><br/><sub>About</sub></td>
+  </tr>
+</table>
 
 *Android app — dark theme, Material 3*
 
