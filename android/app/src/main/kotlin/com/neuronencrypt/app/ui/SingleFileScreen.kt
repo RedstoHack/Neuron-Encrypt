@@ -240,6 +240,16 @@ fun SingleFileScreen(
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center
                         )
+                        if (inputUri == null) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Any file type · Any size",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextLo,
+                                fontFamily = FontFamily.Monospace,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                         if (inputUri != null) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(

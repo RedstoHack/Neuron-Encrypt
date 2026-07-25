@@ -1,0 +1,29 @@
+Categories:
+  - Security
+  - Utilities
+License: GPL-3.0-only
+LicenseUrl: https://github.com/darkmaster0345/Neuron-Encrypt/blob/main/LICENSE
+SourceCode: https://github.com/darkmaster0345/Neuron-Encrypt
+IssueTracker: https://github.com/darkmaster0345/Neuron-Encrypt/issues
+Changelog: https://github.com/darkmaster0345/Neuron-Encrypt/blob/main/CHANGELOG.md
+WebSite: https://darkmaster0345.github.io/Neuron-Encrypt/
+
+AutoName: Neuron Encrypt
+RepoType: git
+Repo: https://github.com/darkmaster0345/Neuron-Encrypt.git
+
+Builds:
+  - versionName: "2.1.0"
+    versionCode: 3
+    commit: v2.1.0
+    subdir: android
+    gradle:
+      - fdroidRelease
+    prebuild: |
+      cd ../neuron-encrypt-jni
+      cargo ndk --platform 26 \
+        -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+        -o ../android/app/src/main/jniLibs \
+        build --release
+    output: app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
+    Reproducible: true

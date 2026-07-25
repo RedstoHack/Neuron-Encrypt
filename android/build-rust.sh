@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Requires: cargo-ndk 3.5.4 — install with: cargo install cargo-ndk@3.5.4
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! command -v cargo >/dev/null 2>&1; then
   echo "cargo is required to build the Rust JNI library" >&2

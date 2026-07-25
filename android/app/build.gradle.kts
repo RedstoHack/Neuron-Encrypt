@@ -19,6 +19,17 @@ android {
         }
     }
 
+    flavorDimensions += "store"
+    productFlavors {
+        create("fdroid") {
+            dimension = "store"
+            signingConfig = null
+        }
+        create("standard") {
+            dimension = "store"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
