@@ -246,7 +246,19 @@ Yes — `neuron-encrypt-cli` ships with the desktop build. Supports piping, JSON
 **Do NOT open a public issue.** Use the [GitLab confidential issue](https://gitlab.com/theredhacker0345/neuron-encrypt/-/issues/new?issue[confidential]=true) to report privately. We'll acknowledge within 48 hours and work with you on a fix before public disclosure.
 </details>
 
+<details>
+<summary><b>What are the CLI limitations?</b></summary>
+
+- **No stdin encrypt** — encryption requires seeking, so piped input decrypt-only for now
+- **Argon2id params are fixed** — no `--memory-cost` / `--time-cost` flags (set by design)
+- **No batch/glob mode** — single-file only; use `find -exec` or a loop for batch
+- **No `--dry-run`** — no preview without processing
+- **No password generation flag** — use a password manager
+</details>
+
 ---
+
+
 
 ## Project structure
 
