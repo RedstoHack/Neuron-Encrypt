@@ -9,6 +9,8 @@ AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 [![Version](https://img.shields.io/badge/version-2.1.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![crates.io](https://img.shields.io/badge/crates.io-ready-6366f1?style=flat-square&logo=rust)](https://crates.io/crates/neuron-encrypt)
+[![F-Droid](https://img.shields.io/badge/F--Droid-pending-22c55e?style=flat-square&logo=f-droid)](https://f-droid.org/packages/com.neuronencrypt.app/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-6366f1?style=flat-square)](#download)
 [![Tests](https://img.shields.io/badge/tests-38%20passing-22c55e?style=flat-square)](#security)
 [![Audit](https://img.shields.io/badge/audit-0%20critical%20%7C%200%20high-22c55e?style=flat-square)](SECURITY_AUDIT.md)
@@ -52,7 +54,7 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 | 🍎 macOS | Universal (Intel + Apple Silicon) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
 | 🐧 Linux | x64 static binary | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
 | 🤖 Android | APK (Android 7.0+) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
-| ⌨️ CLI | For scripts and CI/CD | `cargo install --git https://gitlab.com/theredhacker0345/neuron-encrypt --bin neuron-encrypt-cli` |
+| ⌨️ CLI | For scripts and CI/CD | `cargo install neuron-encrypt-cli` (or `cargo install --git https://gitlab.com/theredhacker0345/neuron-encrypt --bin neuron-encrypt-cli`) |
 
 **Verify your download:** SHA-256 hashes are published in each [release note](https://gitlab.com/theredhacker0345/neuron-encrypt/releases).
 
@@ -136,12 +138,24 @@ Your passphrase is held in memory only long enough to derive the key via Argon2i
 
 ## Quick start
 
-### GUI (desktop)
+### Install
 
 ```bash
+# From crates.io (CLI only)
+cargo install neuron-encrypt-cli
+
+# From source (GUI + CLI)
 git clone https://gitlab.com/theredhacker0345/neuron-encrypt.git
-cd Neuron-Encrypt/neuron-encrypt
-cargo build --release --bin neuron-encrypt
+cd neuron-encrypt
+cargo build --release
+
+# CLI only (faster, no GUI deps)
+cargo build --release --bin neuron-encrypt-cli
+```
+
+### GUI
+
+```bash
 ./target/release/neuron-encrypt
 ```
 
@@ -163,7 +177,13 @@ neuron-encrypt-cli encrypt -i artifact.zip --json --password-file /secrets/key
 
 ### Android
 
-Build from source or download the APK from [releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases). Minimum: Android 7.0 (API 24). No Google Play account required.
+Download the APK from [releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases) or build with the [JNI toolchain](android/README.md). Minimum: Android 7.0 (API 24).
+
+### Run tests
+
+```bash
+cargo test --lib --release
+```
 
 ---
 
@@ -194,7 +214,7 @@ All three are readable by v2.1. New encryptions use V4. There is no auto-migrati
 <details>
 <summary><b>Why is the binary not code-signed?</b></summary>
 
-Code signing requires an Authenticode certificate ($200-400/year for OV, more for EV). This is an open-source project without a budget for that yet. Windows SmartScreen will warn on first install — click "Run anyway". Always verify the SHA-256 hash in the release notes against your download.
+Windows is the only platform that requires code signing, and Authenticode certificates cost $200-400/year. Signing is planned once F-Droid distribution is established. For now, Windows SmartScreen will warn on first install — click "Run anyway". Always verify the SHA-256 hash in the release notes against your download.
 </details>
 
 <details>
@@ -223,32 +243,8 @@ Yes — `neuron-encrypt-cli` ships with the desktop build. Supports piping, JSON
 <details>
 <summary><b>How do I report a vulnerability?</b></summary>
 
-**Do NOT open a public GitHub issue.** Use the [GitLab confidential issue](https://gitlab.com/theredhacker0345/neuron-encrypt/-/issues/new?issue[confidential]=true) to report privately. We'll acknowledge within 48 hours and work with you on a fix before public disclosure.
+**Do NOT open a public issue.** Use the [GitLab confidential issue](https://gitlab.com/theredhacker0345/neuron-encrypt/-/issues/new?issue[confidential]=true) to report privately. We'll acknowledge within 48 hours and work with you on a fix before public disclosure.
 </details>
-
----
-
-## Build from source
-
-**Prerequisites:** Rust 1.70+ ([rustup.rs](https://rustup.rs)), Git.
-
-```bash
-git clone https://gitlab.com/theredhacker0345/neuron-encrypt.git
-cd Neuron-Encrypt/neuron-encrypt
-
-# Desktop GUI + CLI
-cargo build --release
-
-# CLI only (faster, no GUI deps)
-cargo build --release --bin neuron-encrypt-cli
-
-# Run tests
-cargo test --lib --release
-```
-
-**Android:** See [android/README.md](android/README.md) for JNI build instructions.
-
-**Windows installer:** See [installer/README.md](installer/README.md) for NSIS build.
 
 ---
 
@@ -285,6 +281,17 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --lib --release
 ```
+
+---
+
+## Distribution
+
+| Channel | Package | Status |
+|---------|---------|--------|
+| [crates.io](https://crates.io/crates/neuron-encrypt) | `neuron-encrypt` (core) + `neuron-encrypt-cli` (CLI) | ⏳ Ready to publish |
+| [F-Droid](https://f-droid.org/packages/com.neuronencrypt.app/) | Android APK | ⏳ Pending submission |
+| [Homebrew](https://brew.sh) | `neuron-encrypt` formula | ❓ Planned if there's demand |
+| npm / Snap / Scoop | — | ❓ Not planned (Rust native tooling covers all platforms via `cargo install`) |
 
 ---
 
