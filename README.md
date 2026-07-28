@@ -6,14 +6,14 @@
 
 AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
-[![Version](https://img.shields.io/badge/version-2.1.0-6366f1?style=flat-square)](https://github.com/darkmaster0345/Neuron-Encrypt/releases)
+[![Version](https://img.shields.io/badge/version-2.1.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-6366f1?style=flat-square)](#download)
 [![Tests](https://img.shields.io/badge/tests-38%20passing-22c55e?style=flat-square)](#security)
 [![Audit](https://img.shields.io/badge/audit-0%20critical%20%7C%200%20high-22c55e?style=flat-square)](SECURITY_AUDIT.md)
 
-[**Download**](#download) · [**Website**](https://darkmaster0345.github.io/Neuron-Encrypt/) · [**Security**](#security) · [**Docs**](#how-it-works) · [**FAQ**](#faq)
+[**Download**](#download) · [**Website**](https://theredhacker0345.gitlab.io/neuron-encrypt/) · [**Security**](#security) · [**Docs**](#how-it-works) · [**FAQ**](#faq)
 
 </div>
 
@@ -48,13 +48,13 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 
 | Platform | Type | Link |
 |----------|------|------|
-| 🪟 Windows | x64 installer + portable | [Latest release ↗](https://github.com/darkmaster0345/Neuron-Encrypt/releases/latest) |
-| 🍎 macOS | Universal (Intel + Apple Silicon) | [Latest release ↗](https://github.com/darkmaster0345/Neuron-Encrypt/releases/latest) |
-| 🐧 Linux | x64 static binary | [Latest release ↗](https://github.com/darkmaster0345/Neuron-Encrypt/releases/latest) |
-| 🤖 Android | APK (Android 7.0+) | [Latest release ↗](https://github.com/darkmaster0345/Neuron-Encrypt/releases/latest) |
-| ⌨️ CLI | For scripts and CI/CD | `cargo install --git https://github.com/darkmaster0345/Neuron-Encrypt --bin neuron-encrypt-cli` |
+| 🪟 Windows | x64 installer + portable | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| 🍎 macOS | Universal (Intel + Apple Silicon) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| 🐧 Linux | x64 static binary | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| 🤖 Android | APK (Android 7.0+) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| ⌨️ CLI | For scripts and CI/CD | `cargo install --git https://gitlab.com/theredhacker0345/neuron-encrypt --bin neuron-encrypt-cli` |
 
-**Verify your download:** SHA-256 hashes are published in each [release note](https://github.com/darkmaster0345/Neuron-Encrypt/releases).
+**Verify your download:** SHA-256 hashes are published in each [release note](https://gitlab.com/theredhacker0345/neuron-encrypt/releases).
 
 ---
 
@@ -139,7 +139,7 @@ Your passphrase is held in memory only long enough to derive the key via Argon2i
 ### GUI (desktop)
 
 ```bash
-git clone https://github.com/darkmaster0345/Neuron-Encrypt.git
+git clone https://gitlab.com/theredhacker0345/neuron-encrypt.git
 cd Neuron-Encrypt/neuron-encrypt
 cargo build --release --bin neuron-encrypt
 ./target/release/neuron-encrypt
@@ -163,7 +163,7 @@ neuron-encrypt-cli encrypt -i artifact.zip --json --password-file /secrets/key
 
 ### Android
 
-Build from source or download the APK from [releases](https://github.com/darkmaster0345/Neuron-Encrypt/releases). Minimum: Android 7.0 (API 24). No Google Play account required.
+Build from source or download the APK from [releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases). Minimum: Android 7.0 (API 24). No Google Play account required.
 
 ---
 
@@ -223,7 +223,7 @@ Yes — `neuron-encrypt-cli` ships with the desktop build. Supports piping, JSON
 <details>
 <summary><b>How do I report a vulnerability?</b></summary>
 
-**Do NOT open a public GitHub issue.** Use the [GitHub Security Advisory](https://github.com/darkmaster0345/Neuron-Encrypt/security/advisories) to report privately. We'll acknowledge within 48 hours and work with you on a fix before public disclosure.
+**Do NOT open a public GitHub issue.** Use the [GitLab confidential issue](https://gitlab.com/theredhacker0345/neuron-encrypt/-/issues/new?issue[confidential]=true) to report privately. We'll acknowledge within 48 hours and work with you on a fix before public disclosure.
 </details>
 
 ---
@@ -233,7 +233,7 @@ Yes — `neuron-encrypt-cli` ships with the desktop build. Supports piping, JSON
 **Prerequisites:** Rust 1.70+ ([rustup.rs](https://rustup.rs)), Git.
 
 ```bash
-git clone https://github.com/darkmaster0345/Neuron-Encrypt.git
+git clone https://gitlab.com/theredhacker0345/neuron-encrypt.git
 cd Neuron-Encrypt/neuron-encrypt
 
 # Desktop GUI + CLI
@@ -277,7 +277,7 @@ Neuron-Encrypt/
 
 ## Contributing
 
-Bug reports and pull requests welcome. For security vulnerabilities, use [GitHub Security Advisory](https://github.com/darkmaster0345/Neuron-Encrypt/security/advisories) instead of a public issue.
+Bug reports and pull requests welcome. For security vulnerabilities, use [GitLab confidential issue](https://gitlab.com/theredhacker0345/neuron-encrypt/-/issues/new?issue[confidential]=true) instead of a public issue.
 
 ```bash
 rustup component add rustfmt clippy
@@ -296,7 +296,7 @@ GPLv3 — Copyright (c) 2024–2026 Ubaid ur Rehman. See [LICENSE](LICENSE) for 
 
 <div align="center">
 
-**[Download](#download)** · **[Website](https://darkmaster0345.github.io/Neuron-Encrypt/)** · **[Security](#security)** · **[FAQ](#faq)**
+**[Download](#download)** · **[Website](https://theredhacker0345.gitlab.io/neuron-encrypt/)** · **[Security](#security)** · **[FAQ](#faq)**
 
 Made with Rust · No tracking · No cookies · No analytics
 

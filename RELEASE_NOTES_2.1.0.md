@@ -78,7 +78,7 @@ All three are readable by v2.1. New encryptions use V4. There is no auto-migrati
 | `NeuronEncrypt-v2.1.0-arm64-v8a-android.apk` | `SHA256_PLACEHOLDER` |
 | `NeuronEncrypt-v2.1.0-x86_64-android.apk` | `SHA256_PLACEHOLDER` |
 
-**Verify your download:** SHA-256 hashes are published in each [release note](https://github.com/darkmaster0345/Neuron-Encrypt/releases).
+**Verify your download:** SHA-256 hashes are published in each [release note](https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases).
 
 ---
 

@@ -67,5 +67,5 @@ Initial public release.
 - CLI with piping, JSON output, shell completions
 - 100% Safe Rust, `Zeroizing<T>` memory hygiene, `OsRng` CSPRNG
 
-[2.1.0]: https://github.com/darkmaster0345/Neuron-Encrypt/releases/tag/v2.1.0
-[2.0.0]: https://github.com/darkmaster0345/Neuron-Encrypt/releases/tag/v2.0.0
+[2.1.0]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases
+[2.0.0]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases

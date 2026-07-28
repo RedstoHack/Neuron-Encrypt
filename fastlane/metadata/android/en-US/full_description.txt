@@ -32,7 +32,7 @@ Your passphrase never leaves the device. There is no recovery — if you forget 
 • No network permissions in the APK
 • No storage permissions (uses Android Storage Access Framework)
 • No backup (android:allowBackup=false)
-• Source code available at github.com/darkmaster0345/Neuron-Encrypt
+• Source code available at gitlab.com/theredhacker0345/neuron-encrypt
 
 <b>Technical specs</b>
 • Cipher: AES-256-GCM-SIV with BE32 streaming (1 MiB chunks)

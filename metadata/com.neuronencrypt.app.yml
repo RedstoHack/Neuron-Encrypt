@@ -2,15 +2,15 @@ Categories:
   - Security
   - Utilities
 License: GPL-3.0-only
-LicenseUrl: https://github.com/darkmaster0345/Neuron-Encrypt/blob/main/LICENSE
-SourceCode: https://github.com/darkmaster0345/Neuron-Encrypt
-IssueTracker: https://github.com/darkmaster0345/Neuron-Encrypt/issues
-Changelog: https://github.com/darkmaster0345/Neuron-Encrypt/blob/main/CHANGELOG.md
-WebSite: https://darkmaster0345.github.io/Neuron-Encrypt/
+LicenseUrl: https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/LICENSE
+SourceCode: https://gitlab.com/theredhacker0345/neuron-encrypt
+IssueTracker: https://gitlab.com/theredhacker0345/neuron-encrypt/-/issues
+Changelog: https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/CHANGELOG.md
+WebSite: https://theredhacker0345.gitlab.io/neuron-encrypt/
 
 AutoName: Neuron Encrypt
 RepoType: git
-Repo: https://github.com/darkmaster0345/Neuron-Encrypt.git
+Repo: https://gitlab.com/theredhacker0345/neuron-encrypt.git
 
 Builds:
   - versionName: "2.1.0"
@@ -20,10 +20,10 @@ Builds:
     gradle:
       - fdroidRelease
     prebuild: |
-      cd ../neuron-encrypt-jni
+      cd neuron-encrypt-jni
       cargo ndk --platform 26 \
         -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
-        -o ../android/app/src/main/jniLibs \
+        -o ../app/src/main/jniLibs \
         build --release
     output: app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
     Reproducible: true

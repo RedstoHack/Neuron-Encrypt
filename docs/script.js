@@ -110,7 +110,7 @@
     console.log('%c🔒 Neuron Encrypt', styles);
     console.log(
       '%cLocal file encryption. No accounts. No internet. No compromise.\n' +
-      'Source: https://github.com/darkmaster0345/Neuron-Encrypt',
+      'Source: https://gitlab.com/theredhacker0345/neuron-encrypt',
       'color: #a8a8a8; font-family: monospace; font-size: 12px;'
     );
   }

@@ -962,7 +962,7 @@ Stage Summary:
 ### [MEDIUM] Finding C2-2: docs/index.html links to worklog.md on GitHub, but worklog.md is not in the repo — 404
 - **Location**: docs/index.html:218
 - **Category**: website-bug / broken-link
-- **Description**: The website's Security section says "Full audit report: 44 findings..." and links to `https://github.com/darkmaster0345/Neuron-Encrypt/blob/main/worklog.md`. But `worklog.md` does not exist in the repo (verified via `ls` — only README.md, SECURITY_DEFER.md, LICENSE exist at repo root). The actual worklog.md lives at `/home/z/my-project/worklog.md` (outside the repo). Users who click "Read the audit ↗" get a GitHub 404 page.
+- **Description**: The website's Security section says "Full audit report: 44 findings..." and links to `https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/SECURITY_AUDIT.md`. But `worklog.md` does not exist in the repo (verified via `ls` — only README.md, SECURITY_DEFER.md, LICENSE exist at repo root). The actual worklog.md lives at `/home/z/my-project/worklog.md` (outside the repo). Users who click "Read the audit ↗" get a GitHub 404 page.
 - **Verification**: `ls /home/z/my-project/Neuron-Encrypt/worklog.md` → "No such file or directory". `find /home/z/my-project/Neuron-Encrypt -maxdepth 2 -name "worklog*"` → no results. docs/index.html:218 contains the broken link.
 - **Suggested fix**: Either (a) commit worklog.md to the repo at the linked path, or (b) change the link to point to SECURITY_DEFER.md (which does exist), or (c) remove the link and host the audit report elsewhere.
 - **Confidence**: High
