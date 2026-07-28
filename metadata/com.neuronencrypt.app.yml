@@ -2,13 +2,29 @@ Categories:
   - Security
   - Utilities
 License: GPL-3.0-only
-LicenseUrl: https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/LICENSE
+AutoName: Neuron Encrypt
+Summary: Local file encryption. No accounts. No internet. No compromise.
+Description: |-
+  Neuron Encrypt encrypts files directly on your device using AES-256-GCM-SIV
+  and Argon2id — no cloud, no account, no network access required.
+
+  Your passphrase never leaves your device. The encrypted .vx2 file is useless
+  to anyone without the passphrase.
+
+  Features:
+  * AES-256-GCM-SIV (RFC 8452) — nonce-misuse resistant encryption
+  * Argon2id at 256 MiB memory cost — GPU brute-force resistant
+  * Authenticated header (V4 format) — tamper detection on every chunk
+  * Streams any file size at constant ~258 MB RAM
+  * Zero network permissions — fully offline
+  * Atomic writes — no partial files on crash
+  * Memory hygiene — keys and plaintext zeroed after use
+
+WebSite: https://theredhacker0345.gitlab.io/neuron-encrypt/
 SourceCode: https://gitlab.com/theredhacker0345/neuron-encrypt
 IssueTracker: https://gitlab.com/theredhacker0345/neuron-encrypt/-/issues
 Changelog: https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/CHANGELOG.md
-WebSite: https://theredhacker0345.gitlab.io/neuron-encrypt/
 
-AutoName: Neuron Encrypt
 RepoType: git
 Repo: https://gitlab.com/theredhacker0345/neuron-encrypt.git
 
@@ -20,10 +36,24 @@ Builds:
     gradle:
       - fdroidRelease
     prebuild: |
-      cd neuron-encrypt-jni
+      rustup target add \
+        aarch64-linux-android \
+        armv7-linux-androideabi \
+        x86_64-linux-android \
+        i686-linux-android
+      cargo install cargo-ndk --version "^3"
+      cd neuron-encrypt-jni && \
       cargo ndk --platform 24 \
-        -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+        -t arm64-v8a \
+        -t armeabi-v7a \
+        -t x86_64 \
+        -t x86 \
         -o ../app/src/main/jniLibs \
         build --release
     output: app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
     Reproducible: false
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: "2.1.0"
+CurrentVersionCode: 3
