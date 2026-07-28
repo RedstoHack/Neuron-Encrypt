@@ -19,7 +19,7 @@ fi
 
 cd "$SCRIPT_DIR/neuron-encrypt-jni"
 cargo ndk \
-  --platform 26 \
+  --platform 24 \
   -t arm64-v8a \
   -t armeabi-v7a \
   -t x86_64 \

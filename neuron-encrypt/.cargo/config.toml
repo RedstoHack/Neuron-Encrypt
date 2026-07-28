@@ -3,3 +3,15 @@ rustflags = ["-C", "target-feature=+crt-static"]
 
 [target.x86_64-pc-windows-gnu]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-linux-android]
+rustflags = ["--remap-path-prefix", "${HOME}=~"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["--remap-path-prefix", "${HOME}=~"]
+
+[target.x86_64-linux-android]
+rustflags = ["--remap-path-prefix", "${HOME}=~"]
+
+[target.i686-linux-android]
+rustflags = ["--remap-path-prefix", "${HOME}=~"]
