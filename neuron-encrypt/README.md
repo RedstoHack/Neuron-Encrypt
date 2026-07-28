@@ -9,7 +9,7 @@ AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 [![Version](https://img.shields.io/badge/version-2.1.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
-[![crates.io](https://img.shields.io/badge/crates.io-ready-6366f1?style=flat-square&logo=rust)](https://crates.io/crates/neuron-encrypt)
+[![crates.io](https://img.shields.io/crates/v/neuron-encrypt?style=flat-square&logo=rust&label=crates.io)](https://crates.io/crates/neuron-encrypt)
 [![F-Droid](https://img.shields.io/badge/F--Droid-pending-22c55e?style=flat-square&logo=f-droid)](https://f-droid.org/packages/com.neuronencrypt.app/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-6366f1?style=flat-square)](#download)
 [![Tests](https://img.shields.io/badge/tests-38%20passing-22c55e?style=flat-square)](#security)
@@ -321,7 +321,7 @@ See [CLI_IMPROVEMENT_PLAN.md](../../CLI_IMPROVEMENT_PLAN.md) for the post-review
 
 | Channel | Package | Status |
 |---------|---------|--------|
-| [crates.io](https://crates.io/crates/neuron-encrypt) | `neuron-encrypt` (core) + `neuron-encrypt-cli` (CLI) | ⏳ Ready to publish |
+| [crates.io](https://crates.io/crates/neuron-encrypt) | `neuron-encrypt` (core) + `neuron-encrypt-cli` (CLI) | ✅ Published |
 | [F-Droid](https://f-droid.org/packages/com.neuronencrypt.app/) | Android APK | ⏳ Pending submission |
 | [Homebrew](https://brew.sh) | `neuron-encrypt` formula | ❓ Planned if there's demand |
 | npm / Snap / Scoop | — | ❓ Not planned (Rust native tooling covers all platforms via `cargo install`) |
