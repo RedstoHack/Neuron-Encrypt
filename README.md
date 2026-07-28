@@ -33,7 +33,7 @@ AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
 You have files you don't want anyone to see. Tax returns. Medical records. Source code. Photos.
 
-**Neuron Encrypt encrypts them on your device — no cloud, no account, no phone-home.** Your passphrase never leaves your machine. The encrypted `.vx2` file is useless to anyone who doesn't have it.
+**Neuron Encrypt encrypts them on your device — no cloud, no account, no phone-home.** Your passphrase never leaves your machine. The encrypted `.vx2` file is useless to anyone who doesn't have the passphrase.
 
 - **🔒 Nonce-misuse resistant** — AES-256-GCM-SIV (RFC 8452) stays secure even if nonce reuse happens
 - **🧠 Memory-hard KDF** — Argon2id at 256 MiB makes GPU brute-force prohibitively expensive
@@ -293,6 +293,8 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --lib --release
 ```
+
+See [CLI_IMPROVEMENT_PLAN.md](CLI_IMPROVEMENT_PLAN.md) for the post-review improvement backlog.
 
 ---
 

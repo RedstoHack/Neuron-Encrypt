@@ -4,9 +4,23 @@ version = "2.1.0"
 edition = "2021"
 description = "Military-grade file encryption — AES-256-GCM-SIV · Argon2id · HKDF-SHA512"
 license = "GPL-3.0-only"
+authors = ["Ubaid ur Rehman <arifubaid0345@gmail.com>"]
+readme = "README.md"
+keywords = ["encryption", "aes", "argon2", "cli", "crypto"]
+categories = ["command-line-utilities", "cryptography"]
 repository = "https://gitlab.com/theredhacker0345/neuron-encrypt"
 homepage = "https://theredhacker0345.gitlab.io/neuron-encrypt/"
-documentation = "https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/README.md"
+documentation = "https://docs.rs/neuron-encrypt"
+
+include = [
+    "src/**",
+    "assets/**",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+    "build.rs",
+    "build.bat",
+]
 
 # Library crate exposing crypto and error types for Rust consumers.
 # For C/Swift FFI, additional extern "C" wrappers and cbindgen config are required.
