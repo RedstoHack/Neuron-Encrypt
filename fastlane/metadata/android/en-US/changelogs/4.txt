@@ -1,0 +1,1 @@
+v2.1.1 — CLI improvements: split run() into focused helpers, fixed unbounded stdin buffer, unified output validation, centralized JSON error emission, deterministic stream output path, documented progress reporter contract.
