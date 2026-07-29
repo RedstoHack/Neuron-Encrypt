@@ -1,6 +1,6 @@
 [package]
 name = "neuron-encrypt"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 description = "Military-grade file encryption — AES-256-GCM-SIV · Argon2id · HKDF-SHA512"
 license = "GPL-3.0-only"
@@ -60,6 +60,7 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 indicatif = "0.18.4"
 rpassword = "7"
+tempfile = "3"
 
 [lints.clippy]
 explicit_auto_deref = "allow"

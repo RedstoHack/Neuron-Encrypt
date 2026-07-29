@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -211,16 +211,29 @@ impl IndProgress {
     }
 }
 
+/// Implements [`ProgressReporter`] for the terminal progress bar.
+///
+/// # Progress range
+///
+/// The `report(progress, …)` callback accepts `progress` in `[0.0, 1.0]`:
+/// - `0.0` – `0.10` — KDF phase (bar stays near 0 %).
+/// - `0.10` – `0.95` — encryption/decryption (bar maps 0 % → 100 %).
+/// - `0.95` – `1.0` — finalization / cleanup.
+///
+/// Values outside `[0.0, 1.0]` are silently clamped, and the bar
+/// position is capped at `total_bytes` to prevent exceeding 100 %.
 impl ProgressReporter for IndProgress {
     fn report(&self, progress: f32, message: &str) {
+        let clamped = progress.clamp(0.0, 1.0);
         let bytes = if self.total_bytes > 0 {
-            ((progress - 0.10).max(0.0) / 0.85 * self.total_bytes as f32) as u64
+            let fraction = ((clamped - 0.10) / 0.85).clamp(0.0, 1.0);
+            (fraction * self.total_bytes as f64) as u64
         } else {
-            (progress * self.total_bytes as f32) as u64
+            0
         };
 
         if self.total_bytes > 0 {
-            self.pb.set_position(bytes);
+            self.pb.set_position(bytes.min(self.total_bytes));
         }
         self.pb.set_message(message.to_owned());
     }
@@ -287,13 +300,25 @@ fn same_path(a: &Path, b: &Path) -> bool {
     a == b
 }
 
-fn remove_existing_output_if_forced(
+fn validate_output_path(
     input_path: &Path,
     output_path: &Path,
     force: bool,
+    json: bool,
+    start: &Instant,
 ) -> Result<(), (ExitCode, String)> {
-    if !force || !output_path.exists() {
+    if !output_path.exists() {
         return Ok(());
+    }
+
+    if !force {
+        let msg = format!(
+            "Output file already exists: {}. Use --force to overwrite.",
+            output_path.display()
+        );
+        emit_json_result(json, start, Some(output_path.display().to_string()), None, None, "error", Some(msg.clone()));
+        eprintln!("Error: {msg}");
+        return Err((ExitCode::BadInput, msg));
     }
 
     let input = fs::canonicalize(input_path).map_err(|e| {
@@ -310,17 +335,17 @@ fn remove_existing_output_if_forced(
     })?;
 
     if same_path(&input, &output) {
-        return Err((
-            ExitCode::BadInput,
-            "Refusing to overwrite the input file in place.".to_owned(),
-        ));
+        let msg = "Refusing to overwrite the input file in place.".to_owned();
+        emit_json_result(json, start, Some(output_path.display().to_string()), None, None, "error", Some(msg.clone()));
+        eprintln!("Error: {msg}");
+        return Err((ExitCode::BadInput, msg));
     }
 
     if output_path.is_dir() {
-        return Err((
-            ExitCode::BadInput,
-            format!("Output path is a directory: {}", output_path.display()),
-        ));
+        let msg = format!("Output path is a directory: {}", output_path.display());
+        emit_json_result(json, start, Some(output_path.display().to_string()), None, None, "error", Some(msg.clone()));
+        eprintln!("Error: {msg}");
+        return Err((ExitCode::BadInput, msg));
     }
 
     fs::remove_file(output_path).map_err(|e| {
@@ -331,32 +356,67 @@ fn remove_existing_output_if_forced(
     })
 }
 
-fn check_output_exists(path: &Path, force: bool, json: bool) -> Result<(), ExitCode> {
-    if path.exists() && !force {
-        let msg = format!(
-            "Output file already exists: {}. Use --force to overwrite.",
-            path.display()
-        );
-        if json {
-            emit_json(&JsonResult {
-                status: "error".into(),
-                output_path: Some(path.display().to_string()),
-                bytes_processed: None,
-                duration_ms: 0,
-                sha256: None,
-                error: Some(msg.clone()),
-            });
-        }
-        eprintln!("Error: {msg}");
-        return Err(ExitCode::BadInput);
-    }
-    Ok(())
-}
-
 fn emit_json(result: &JsonResult) {
     match serde_json::to_string(result) {
         Ok(json) => println!("{json}"),
         Err(error) => eprintln!("Error: failed to serialize JSON output: {error}"),
+    }
+}
+
+fn err_json(start: &Instant, output: Option<String>, msg: &str) -> JsonResult {
+    JsonResult {
+        status: "error".into(),
+        output_path: output,
+        bytes_processed: None,
+        duration_ms: start.elapsed().as_millis(),
+        sha256: None,
+        error: Some(msg.into()),
+    }
+}
+
+fn emit_error_json(json: bool, start: &Instant, output: Option<String>, msg: &str) {
+    if json {
+        emit_json(&err_json(start, output, msg));
+    }
+}
+
+fn emit_success_json(
+    json: bool,
+    start: &Instant,
+    output: Option<String>,
+    bytes_processed: Option<u64>,
+    sha256: Option<String>,
+) {
+    if json {
+        emit_json(&JsonResult {
+            status: "success".into(),
+            output_path: output,
+            bytes_processed,
+            duration_ms: start.elapsed().as_millis(),
+            sha256,
+            error: None,
+        });
+    }
+}
+
+fn emit_json_result(
+    json: bool,
+    start: &Instant,
+    output: Option<String>,
+    bytes_processed: Option<u64>,
+    sha256: Option<String>,
+    status: &str,
+    error: Option<String>,
+) {
+    if json {
+        emit_json(&JsonResult {
+            status: status.to_string(),
+            output_path: output,
+            bytes_processed,
+            duration_ms: start.elapsed().as_millis(),
+            sha256,
+            error,
+        });
     }
 }
 
@@ -373,6 +433,298 @@ fn compute_sha256(path: &Path) -> Result<String, String> {
     }
     let result = hasher.finalize();
     Ok(format!("{result:x}"))
+}
+
+fn setup_reporter(show_progress: bool, source_size: Option<u64>) -> Box<dyn ProgressReporter> {
+    if show_progress {
+        Box::new(IndProgress::new(source_size, "Deriving key..."))
+    } else {
+        Box::new(QuietReporter)
+    }
+}
+
+fn run_file(
+    cli: &Cli,
+    start: Instant,
+    password: &[u8],
+    mode: &str,
+    input_str: &str,
+    output_str: &Option<String>,
+) -> Result<(), ExitCode> {
+    let input_path = PathBuf::from(input_str);
+    if !input_path.exists() {
+        let msg = format!("Input file not found: {}", input_path.display());
+        emit_error_json(cli.json, &start, None, &msg);
+        eprintln!("Error: {msg}");
+        return Err(ExitCode::BadInput);
+    }
+
+    if mode == "encrypt" && is_vx2_file(&input_path) && !cli.force {
+        let msg = "Input file appears to be already encrypted (.vx2). Encrypting again will produce .vx2.vx2. Use --force to proceed.".to_owned();
+        emit_error_json(cli.json, &start, None, &msg);
+        eprintln!("Warning: {msg}");
+        return Err(ExitCode::BadInput);
+    }
+
+    let source_size = fs::metadata(&input_path).ok().map(|m| m.len());
+    let output_path = resolve_output(&input_path, mode, output_str);
+
+    if let Err((code, msg)) = validate_output_path(&input_path, &output_path, cli.force, cli.json, &start) {
+        emit_error_json(cli.json, &start, Some(output_path.display().to_string()), &msg);
+        eprintln!("Error: {msg}");
+        return Err(code);
+    }
+
+    if !cli.quiet && !cli.json {
+        let action = if mode == "encrypt" { "Encrypting" } else { "Decrypting" };
+        let total = source_size.unwrap_or(0);
+        eprintln!(
+            "{} {}{} → {}",
+            action,
+            input_path.display(),
+            if total > 0 {
+                format!(" ({})", HumanBytes(total))
+            } else {
+                String::new()
+            },
+            output_path.display()
+        );
+    }
+
+    let show_progress = !cli.quiet && !cli.no_progress && !cli.json;
+    let reporter = setup_reporter(show_progress, source_size);
+    let throttled = ThrottledReporter::new(reporter.as_ref());
+
+    let result = if mode == "encrypt" {
+        crypto::encrypt_file(
+            &input_path,
+            &output_path,
+            cli.force,
+            password,
+            &throttled,
+            None,
+        )
+    } else {
+        crypto::decrypt_file(
+            &input_path,
+            &output_path,
+            cli.force,
+            password,
+            &throttled,
+            None,
+        )
+    };
+
+    match result {
+        Ok(dest) => {
+            let elapsed = start.elapsed().as_millis();
+            if mode == "encrypt" {
+                let hash = compute_sha256(&input_path).ok();
+                emit_success_json(cli.json, &start, Some(dest.display().to_string()), source_size, hash.clone());
+                if !cli.quiet && !cli.json {
+                    eprintln!(
+                        "✓ Written to {} ({:.2}s)",
+                        dest.display(),
+                        elapsed as f64 / 1000.0
+                    );
+                    if let Some(h) = &hash {
+                        eprintln!("SHA-256 (original): {h}");
+                    }
+                }
+            } else {
+                let hash = compute_sha256(&dest).ok();
+                emit_success_json(cli.json, &start, Some(dest.display().to_string()), source_size, hash.clone());
+                if !cli.quiet && !cli.json {
+                    eprintln!(
+                        "✓ Written to {} ({:.2}s)",
+                        dest.display(),
+                        elapsed as f64 / 1000.0
+                    );
+                    if let Some(h) = &hash {
+                        eprintln!("SHA-256 (decrypted): {h}");
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(CryptoError::DecryptionFailed) => {
+            let msg = "Wrong passphrase or corrupted file.";
+            emit_error_json(cli.json, &start, Some(output_path.display().to_string()), msg);
+            if !cli.json {
+                eprintln!("✗ {msg}");
+            }
+            Err(ExitCode::WrongPassword)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            emit_error_json(cli.json, &start, Some(output_path.display().to_string()), &msg);
+            if !cli.json {
+                eprintln!("✗ {msg}");
+            }
+            Err(ExitCode::RuntimeError)
+        }
+    }
+}
+
+fn run_stream(
+    cli: &Cli,
+    start: Instant,
+    password: &[u8],
+    mode: &str,
+    input_str: &str,
+    output_str: &Option<String>,
+    is_pipe_in: bool,
+    is_pipe_out: bool,
+) -> Result<(), ExitCode> {
+    let source_size = if !is_pipe_in {
+        let p = PathBuf::from(input_str);
+        fs::metadata(&p).ok().map(|m| m.len())
+    } else {
+        None
+    };
+
+    if !cli.quiet && !cli.json {
+        let action = if mode == "encrypt" { "Encrypting" } else { "Decrypting" };
+        eprintln!(
+            "{} stdin → stdout{}",
+            action,
+            if let Some(s) = source_size {
+                format!(" ({})", HumanBytes(s))
+            } else {
+                String::new()
+            }
+        );
+    }
+
+    let show_progress = !cli.quiet && !cli.no_progress && !cli.json && !is_pipe_out;
+    let reporter = setup_reporter(show_progress, source_size);
+    let throttled = ThrottledReporter::new(reporter.as_ref());
+
+    let success_output_path: Option<String> = if is_pipe_out {
+        Some("-".into())
+    } else {
+        output_str.clone()
+    };
+
+    let result = if mode == "encrypt" {
+        if is_pipe_in {
+            let msg = "Encryption from stdin is not supported (requires seeking). Use a file input instead.";
+            emit_error_json(cli.json, &start, None, msg);
+            eprintln!("Error: {msg}");
+            return Err(ExitCode::BadInput);
+        } else {
+            let mut f = match fs::File::open(input_str) {
+                Ok(f) => f,
+                Err(e) => {
+                    let msg = format!("Cannot open input: {e}");
+                    emit_error_json(cli.json, &start, None, &msg);
+                    eprintln!("Error: {msg}");
+                    return Err(ExitCode::BadInput);
+                }
+            };
+            let stdout = io::stdout();
+            let mut stdout_lock = stdout.lock();
+            crypto::encrypt_stream(
+                &mut f,
+                &mut stdout_lock,
+                password,
+                source_size,
+                &throttled,
+            )
+        }
+    } else {
+        let mut reader: Box<dyn Read + Seek> = if is_pipe_in {
+            let mut tmp = tempfile::tempfile().map_err(|e| {
+                let msg = format!("Cannot create temporary file: {e}");
+                emit_error_json(cli.json, &start, None, &msg);
+                eprintln!("Error: {msg}");
+                ExitCode::RuntimeError
+            })?;
+            io::copy(&mut io::stdin().lock(), &mut tmp).map_err(|e| {
+                let msg = format!("Cannot read stdin: {e}");
+                emit_error_json(cli.json, &start, None, &msg);
+                eprintln!("Error: {msg}");
+                ExitCode::RuntimeError
+            })?;
+            tmp.seek(io::SeekFrom::Start(0)).map_err(|e| {
+                let msg = format!("Cannot seek temporary file: {e}");
+                emit_error_json(cli.json, &start, None, &msg);
+                eprintln!("Error: {msg}");
+                ExitCode::RuntimeError
+            })?;
+            Box::new(tmp)
+        } else {
+            match fs::File::open(input_str) {
+                Ok(f) => Box::new(f),
+                Err(e) => {
+                    let msg = format!("Cannot open input: {e}");
+                    emit_error_json(cli.json, &start, None, &msg);
+                    eprintln!("Error: {msg}");
+                    return Err(ExitCode::BadInput);
+                }
+            }
+        };
+        if is_pipe_out {
+            let stdout = io::stdout();
+            let mut stdout_lock = stdout.lock();
+            crypto::decrypt_stream(
+                &mut reader,
+                &mut stdout_lock,
+                password,
+                source_size,
+                &throttled,
+            )
+        } else if let Some(path) = output_str.as_deref() {
+            let mut out = match fs::File::create(path) {
+                Ok(f) => f,
+                Err(e) => {
+                    let msg = format!("Cannot open output: {e}");
+                    emit_error_json(cli.json, &start, Some(path.to_owned()), &msg);
+                    eprintln!("Error: {msg}");
+                    return Err(ExitCode::BadInput);
+                }
+            };
+            crypto::decrypt_stream(
+                &mut reader,
+                &mut out,
+                password,
+                source_size,
+                &throttled,
+            )
+        } else {
+            let msg = "Output path is required when decrypting piped input unless -o - is set.";
+            emit_error_json(cli.json, &start, None, msg);
+            eprintln!("Error: {msg}");
+            return Err(ExitCode::BadInput);
+        }
+    };
+
+    match result {
+        Ok(()) => {
+            let elapsed = start.elapsed().as_millis();
+            emit_success_json(cli.json, &start, success_output_path, source_size, None);
+            if !cli.quiet && !cli.json {
+                eprintln!("✓ Complete ({:.2}s)", elapsed as f64 / 1000.0);
+            }
+            Ok(())
+        }
+        Err(CryptoError::DecryptionFailed) => {
+            let msg = "Wrong passphrase or corrupted file.";
+            emit_error_json(cli.json, &start, None, msg);
+            if !cli.json {
+                eprintln!("✗ {msg}");
+            }
+            Err(ExitCode::WrongPassword)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            emit_error_json(cli.json, &start, None, &msg);
+            if !cli.json {
+                eprintln!("✗ {msg}");
+            }
+            Err(ExitCode::RuntimeError)
+        }
+    }
 }
 
 fn run() -> Result<(), ExitCode> {
@@ -396,6 +748,7 @@ fn run() -> Result<(), ExitCode> {
             match read_password_confirmed(&cli.password_file) {
                 Ok(password) => password,
                 Err((code, msg)) => {
+                    emit_error_json(cli.json, &start, None, &msg);
                     eprintln!("Error: {msg}");
                     return Err(code);
                 }
@@ -404,16 +757,7 @@ fn run() -> Result<(), ExitCode> {
         _ => match read_password(&cli.password_file) {
             Ok(password) => password,
             Err((code, msg)) => {
-                if cli.json {
-                    emit_json(&JsonResult {
-                        status: "error".into(),
-                        output_path: None,
-                        bytes_processed: None,
-                        duration_ms: start.elapsed().as_millis(),
-                        sha256: None,
-                        error: Some(msg.clone()),
-                    });
-                }
+                emit_error_json(cli.json, &start, None, &msg);
                 eprintln!("Error: {msg}");
                 return Err(code);
             }
@@ -425,412 +769,18 @@ fn run() -> Result<(), ExitCode> {
             "Passphrase too short (minimum {} bytes).",
             crypto::MIN_PASSWORD_LEN
         );
-        if cli.json {
-            emit_json(&JsonResult {
-                status: "error".into(),
-                output_path: None,
-                bytes_processed: None,
-                duration_ms: start.elapsed().as_millis(),
-                sha256: None,
-                error: Some(msg.clone()),
-            });
-        }
+        emit_error_json(cli.json, &start, None, &msg);
         eprintln!("Error: {msg}");
         return Err(ExitCode::BadInput);
     }
 
     let is_pipe_in = input_str == "-";
     let is_pipe_out = output_str.as_deref() == Some("-");
-    let show_progress = !cli.quiet && !cli.no_progress && !cli.json && !is_pipe_out;
 
     if !is_pipe_in && !is_pipe_out {
-        let input_path = PathBuf::from(&input_str);
-        if !input_path.exists() {
-            let msg = format!("Input file not found: {}", input_path.display());
-            if cli.json {
-                emit_json(&JsonResult {
-                    status: "error".into(),
-                    output_path: None,
-                    bytes_processed: None,
-                    duration_ms: start.elapsed().as_millis(),
-                    sha256: None,
-                    error: Some(msg.clone()),
-                });
-            }
-            eprintln!("Error: {msg}");
-            return Err(ExitCode::BadInput);
-        }
-
-        if mode == "encrypt" && is_vx2_file(&input_path) && !cli.force {
-            let msg = "Input file appears to be already encrypted (.vx2). Encrypting again will produce .vx2.vx2. Use --force to proceed.".to_owned();
-            if cli.json {
-                emit_json(&JsonResult {
-                    status: "error".into(),
-                    output_path: None,
-                    bytes_processed: None,
-                    duration_ms: start.elapsed().as_millis(),
-                    sha256: None,
-                    error: Some(msg.clone()),
-                });
-            }
-            eprintln!("Warning: {msg}");
-            return Err(ExitCode::BadInput);
-        }
-
-        let source_size = fs::metadata(&input_path).ok().map(|m| m.len());
-        let output_path = resolve_output(&input_path, mode, &output_str);
-
-        check_output_exists(&output_path, cli.force, cli.json)?;
-        if let Err((code, msg)) =
-            remove_existing_output_if_forced(&input_path, &output_path, cli.force)
-        {
-            if cli.json {
-                emit_json(&JsonResult {
-                    status: "error".into(),
-                    output_path: Some(output_path.display().to_string()),
-                    bytes_processed: None,
-                    duration_ms: start.elapsed().as_millis(),
-                    sha256: None,
-                    error: Some(msg.clone()),
-                });
-            }
-            eprintln!("Error: {msg}");
-            return Err(code);
-        }
-
-        if !cli.quiet && !cli.json {
-            let action = if mode == "encrypt" {
-                "Encrypting"
-            } else {
-                "Decrypting"
-            };
-            let total = source_size.unwrap_or(0);
-            eprintln!(
-                "{} {}{} → {}",
-                action,
-                input_path.display(),
-                if total > 0 {
-                    format!(" ({})", HumanBytes(total))
-                } else {
-                    String::new()
-                },
-                output_path.display()
-            );
-        }
-
-        let reporter: Box<dyn ProgressReporter> = if show_progress {
-            Box::new(IndProgress::new(source_size, "Deriving key..."))
-        } else {
-            Box::new(QuietReporter)
-        };
-        let throttled = ThrottledReporter::new(reporter.as_ref());
-
-        let result = if mode == "encrypt" {
-            crypto::encrypt_file(
-                &input_path,
-                &output_path,
-                cli.force,
-                password.as_slice(),
-                &throttled,
-                None,
-            )
-        } else {
-            crypto::decrypt_file(
-                &input_path,
-                &output_path,
-                cli.force,
-                password.as_slice(),
-                &throttled,
-                None,
-            )
-        };
-
-        match result {
-            Ok(dest) => {
-                let elapsed = start.elapsed().as_millis();
-                if mode == "encrypt" {
-                    let hash = compute_sha256(&input_path).ok();
-                    if cli.json {
-                        emit_json(&JsonResult {
-                            status: "success".into(),
-                            output_path: Some(dest.display().to_string()),
-                            bytes_processed: source_size,
-                            duration_ms: elapsed,
-                            sha256: hash.clone(),
-                            error: None,
-                        });
-                    } else if !cli.quiet {
-                        eprintln!(
-                            "✓ Written to {} ({:.2}s)",
-                            dest.display(),
-                            elapsed as f64 / 1000.0
-                        );
-                        if let Some(h) = &hash {
-                            eprintln!("SHA-256 (original): {h}");
-                        }
-                    }
-                } else {
-                    let hash = compute_sha256(&dest).ok();
-                    if cli.json {
-                        emit_json(&JsonResult {
-                            status: "success".into(),
-                            output_path: Some(dest.display().to_string()),
-                            bytes_processed: source_size,
-                            duration_ms: elapsed,
-                            sha256: hash.clone(),
-                            error: None,
-                        });
-                    } else if !cli.quiet {
-                        eprintln!(
-                            "✓ Written to {} ({:.2}s)",
-                            dest.display(),
-                            elapsed as f64 / 1000.0
-                        );
-                        if let Some(h) = &hash {
-                            eprintln!("SHA-256 (decrypted): {h}");
-                        }
-                    }
-                }
-                Ok(())
-            }
-            Err(CryptoError::DecryptionFailed) => {
-                let msg = "Wrong passphrase or corrupted file.";
-                if cli.json {
-                    emit_json(&JsonResult {
-                        status: "error".into(),
-                        output_path: Some(output_path.display().to_string()),
-                        bytes_processed: None,
-                        duration_ms: start.elapsed().as_millis(),
-                        sha256: None,
-                        error: Some(msg.into()),
-                    });
-                } else {
-                    eprintln!("✗ {msg}");
-                }
-                Err(ExitCode::WrongPassword)
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if cli.json {
-                    emit_json(&JsonResult {
-                        status: "error".into(),
-                        output_path: Some(output_path.display().to_string()),
-                        bytes_processed: None,
-                        duration_ms: start.elapsed().as_millis(),
-                        sha256: None,
-                        error: Some(msg.clone()),
-                    });
-                } else {
-                    eprintln!("✗ {msg}");
-                }
-                Err(ExitCode::RuntimeError)
-            }
-        }
+        run_file(&cli, start, password.as_slice(), mode, &input_str, &output_str)
     } else {
-        let source_size = if !is_pipe_in {
-            let p = PathBuf::from(&input_str);
-            fs::metadata(&p).ok().map(|m| m.len())
-        } else {
-            None
-        };
-
-        if !cli.quiet && !cli.json {
-            let action = if mode == "encrypt" {
-                "Encrypting"
-            } else {
-                "Decrypting"
-            };
-            eprintln!(
-                "{} stdin → stdout{}",
-                action,
-                if let Some(s) = source_size {
-                    format!(" ({})", HumanBytes(s))
-                } else {
-                    String::new()
-                }
-            );
-        }
-
-        let reporter: Box<dyn ProgressReporter> = if show_progress {
-            Box::new(IndProgress::new(source_size, "Deriving key..."))
-        } else {
-            Box::new(QuietReporter)
-        };
-        let throttled = ThrottledReporter::new(reporter.as_ref());
-
-        let result = if mode == "encrypt" {
-            if is_pipe_in {
-                let msg = "Encryption from stdin is not supported (requires seeking). Use a file input instead.";
-                if cli.json {
-                    emit_json(&JsonResult {
-                        status: "error".into(),
-                        output_path: None,
-                        bytes_processed: None,
-                        duration_ms: start.elapsed().as_millis(),
-                        sha256: None,
-                        error: Some(msg.into()),
-                    });
-                }
-                eprintln!("Error: {msg}");
-                return Err(ExitCode::BadInput);
-            } else {
-                let mut f = match fs::File::open(&input_str) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        let msg = format!("Cannot open input: {e}");
-                        if cli.json {
-                            emit_json(&JsonResult {
-                                status: "error".into(),
-                                output_path: None,
-                                bytes_processed: None,
-                                duration_ms: start.elapsed().as_millis(),
-                                sha256: None,
-                                error: Some(msg.clone()),
-                            });
-                        }
-                        eprintln!("Error: {msg}");
-                        return Err(ExitCode::BadInput);
-                    }
-                };
-                let stdout = io::stdout();
-                let mut stdout_lock = stdout.lock();
-                crypto::encrypt_stream(
-                    &mut f,
-                    &mut stdout_lock,
-                    password.as_slice(),
-                    source_size,
-                    &throttled,
-                )
-            }
-        } else {
-            let mut reader: Box<dyn Read> = if is_pipe_in {
-                let mut buffer = Vec::new();
-                io::stdin()
-                    .lock()
-                    .read_to_end(&mut buffer)
-                    .map_err(|_| ExitCode::RuntimeError)?;
-                Box::new(io::Cursor::new(buffer))
-            } else {
-                match fs::File::open(&input_str) {
-                    Ok(f) => Box::new(f),
-                    Err(e) => {
-                        let msg = format!("Cannot open input: {e}");
-                        if cli.json {
-                            emit_json(&JsonResult {
-                                status: "error".into(),
-                                output_path: None,
-                                bytes_processed: None,
-                                duration_ms: start.elapsed().as_millis(),
-                                sha256: None,
-                                error: Some(msg.clone()),
-                            });
-                        }
-                        eprintln!("Error: {msg}");
-                        return Err(ExitCode::BadInput);
-                    }
-                }
-            };
-            if is_pipe_out {
-                let stdout = io::stdout();
-                let mut stdout_lock = stdout.lock();
-                crypto::decrypt_stream(
-                    &mut reader,
-                    &mut stdout_lock,
-                    password.as_slice(),
-                    source_size,
-                    &throttled,
-                )
-            } else if let Some(path) = output_str.as_deref() {
-                let mut out = match fs::File::create(path) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        let msg = format!("Cannot open output: {e}");
-                        if cli.json {
-                            emit_json(&JsonResult {
-                                status: "error".into(),
-                                output_path: Some(path.to_owned()),
-                                bytes_processed: None,
-                                duration_ms: start.elapsed().as_millis(),
-                                sha256: None,
-                                error: Some(msg.clone()),
-                            });
-                        }
-                        eprintln!("Error: {msg}");
-                        return Err(ExitCode::BadInput);
-                    }
-                };
-                crypto::decrypt_stream(
-                    &mut reader,
-                    &mut out,
-                    password.as_slice(),
-                    source_size,
-                    &throttled,
-                )
-            } else {
-                let msg = "Output path is required when decrypting piped input unless -o - is set.";
-                if cli.json {
-                    emit_json(&JsonResult {
-                        status: "error".into(),
-                        output_path: None,
-                        bytes_processed: None,
-                        duration_ms: start.elapsed().as_millis(),
-                        sha256: None,
-                        error: Some(msg.into()),
-                    });
-                }
-                eprintln!("Error: {msg}");
-                return Err(ExitCode::BadInput);
-            }
-        };
-
-        match result {
-            Ok(()) => {
-                let elapsed = start.elapsed().as_millis();
-                if cli.json {
-                    emit_json(&JsonResult {
-                        status: "success".into(),
-                        output_path: None,
-                        bytes_processed: source_size,
-                        duration_ms: elapsed,
-                        sha256: None,
-                        error: None,
-                    });
-                } else if !cli.quiet {
-                    eprintln!("✓ Complete ({:.2}s)", elapsed as f64 / 1000.0);
-                }
-                Ok(())
-            }
-            Err(CryptoError::DecryptionFailed) => {
-                let msg = "Wrong passphrase or corrupted file.";
-                if cli.json {
-                    emit_json(&JsonResult {
-                        status: "error".into(),
-                        output_path: None,
-                        bytes_processed: None,
-                        duration_ms: start.elapsed().as_millis(),
-                        sha256: None,
-                        error: Some(msg.into()),
-                    });
-                }
-                eprintln!("✗ {msg}");
-                Err(ExitCode::WrongPassword)
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if cli.json {
-                    emit_json(&JsonResult {
-                        status: "error".into(),
-                        output_path: None,
-                        bytes_processed: None,
-                        duration_ms: start.elapsed().as_millis(),
-                        sha256: None,
-                        error: Some(msg.clone()),
-                    });
-                }
-                eprintln!("✗ {msg}");
-                Err(ExitCode::RuntimeError)
-            }
-        }
+        run_stream(&cli, start, password.as_slice(), mode, &input_str, &output_str, is_pipe_in, is_pipe_out)
     }
 }
 
