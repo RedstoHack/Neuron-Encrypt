@@ -31,7 +31,7 @@ Repo: https://gitlab.com/theredhacker0345/neuron-encrypt.git
 Builds:
   - versionName: "2.1.0"
     versionCode: 3
-    commit: v2.1.0
+    commit: c313986105e5f45f23535108107a872750913b7a
     subdir: android
     gradle:
       - fdroidRelease
