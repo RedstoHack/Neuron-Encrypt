@@ -4,6 +4,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,7 +45,7 @@ fun PasswordField(
             trailingIcon = {
                 IconButton(onClick = onToggleShow) {
                     Icon(
-                        imageVector = if (showPassword) androidx.compose.material.icons.Icons.Default.VisibilityOff else androidx.compose.material.icons.Icons.Default.Visibility,
+                        imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                         contentDescription = if (showPassword) "Hide password" else "Show password",
                         tint = TextMed
                     )
@@ -127,7 +131,7 @@ fun ErrorBanner(
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = androidx.compose.material.icons.Icons.Default.Error,
+                    imageVector = Icons.Default.Error,
                     contentDescription = "Error",
                     tint = Error
                 )

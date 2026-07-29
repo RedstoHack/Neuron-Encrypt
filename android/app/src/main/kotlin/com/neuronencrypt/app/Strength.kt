@@ -73,7 +73,7 @@ fun evalStrength(password: String): StrengthResult {
     // 28-35 = Fair (offline attack in hours)
     // 36-59 = Strong (offline attack in years with Argon2id)
     // 60+ = Elite (offline attack infeasible)
-    val fraction = (entropy / 80.0f).coerceIn(0.0f, 1.0f)
+    val fraction = (entropy / 80.0).coerceIn(0.0, 1.0).toFloat()
 
     return when {
         entropy < 28.0 -> StrengthResult(Strength.Weak, fraction, "Weak")

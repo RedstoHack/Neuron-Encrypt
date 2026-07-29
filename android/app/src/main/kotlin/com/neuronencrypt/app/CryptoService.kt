@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -57,7 +58,7 @@ class CryptoService : Service() {
                 val action = intent.getStringExtra(EXTRA_ACTION) ?: "Processing"
                 val progress = intent.getIntExtra(EXTRA_PROGRESS, 0)
                 val notification = buildNotification(action, filename, progress)
-                val nm = getSystemService(NOTIFICATION_MANAGER) as NotificationManager
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 nm.notify(NOTIFICATION_ID, notification)
             }
             ACTION_STOP -> {
@@ -78,7 +79,7 @@ class CryptoService : Service() {
                 description = "Shows progress of file encryption/decryption operations"
                 setShowBadge(false)
             }
-            val nm = getSystemService(NOTIFICATION_MANAGER) as NotificationManager
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(channel)
         }
     }

@@ -19,10 +19,12 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -118,9 +120,9 @@ fun SingleFileScreen(
             // Start ForegroundService to keep the process alive when backgrounded
             val action = if (fileMode == FileMode.Encrypt) "Encrypting" else "Decrypting"
             val serviceIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                action = com.neuronencrypt.app.CryptoService.ACTION_START
-                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName)
-                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action)
+                setAction(com.neuronencrypt.app.CryptoService.ACTION_START)
+                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName as String)
+                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
             }
             androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
 
@@ -134,9 +136,9 @@ fun SingleFileScreen(
                             // Update notification progress
                             val progress = (fraction * 100).toInt().coerceIn(0, 100)
                             val updateIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                                action = com.neuronencrypt.app.CryptoService.ACTION_UPDATE
-                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName)
-                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action)
+                                setAction(com.neuronencrypt.app.CryptoService.ACTION_UPDATE)
+                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName as String)
+                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
                                 putExtra(com.neuronencrypt.app.CryptoService.EXTRA_PROGRESS, progress)
                             }
                             androidx.core.content.ContextCompat.startForegroundService(context, updateIntent)
@@ -176,7 +178,7 @@ fun SingleFileScreen(
                     cancelFlag.set(false)
                     // Stop the foreground service
                     val stopIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                        action = com.neuronencrypt.app.CryptoService.ACTION_STOP
+                        setAction(com.neuronencrypt.app.CryptoService.ACTION_STOP)
                     }
                     context.stopService(stopIntent)
                 }
