@@ -24,7 +24,7 @@ fun encrypt(
             inputFd.fd,
             outputFd.fd,
             password,
-            inputFd.statSize(),
+            inputFd.statSize,
             listener,
             cancelFlag
         )
@@ -54,7 +54,7 @@ fun decrypt(
             inputFd.fd,
             outputFd.fd,
             password,
-            inputFd.statSize(),
+            inputFd.statSize,
             listener,
             cancelFlag
         )
