@@ -13,6 +13,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
+trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
 #[derive(Parser)]
 #[command(
     name = "neuron-encrypt-cli",
@@ -227,7 +230,7 @@ impl ProgressReporter for IndProgress {
         let clamped = progress.clamp(0.0, 1.0);
         let bytes = if self.total_bytes > 0 {
             let fraction = ((clamped - 0.10) / 0.85).clamp(0.0, 1.0);
-            (fraction * self.total_bytes as f64) as u64
+            (fraction * self.total_bytes as f32) as u64
         } else {
             0
         };
@@ -633,7 +636,7 @@ fn run_stream(
             )
         }
     } else {
-        let mut reader: Box<dyn Read + Seek> = if is_pipe_in {
+        let mut reader: Box<dyn ReadSeek> = if is_pipe_in {
             let mut tmp = tempfile::tempfile().map_err(|e| {
                 let msg = format!("Cannot create temporary file: {e}");
                 emit_error_json(cli.json, &start, None, &msg);

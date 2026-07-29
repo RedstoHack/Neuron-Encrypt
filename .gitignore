@@ -4,3 +4,6 @@
 fix_*.py
 gui_part*.txt
 fix_*.txt
+  
+# Local cargo config  
+neuron-encrypt/.cargo/config.toml  
