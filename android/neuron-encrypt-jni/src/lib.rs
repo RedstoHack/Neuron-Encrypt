@@ -2,7 +2,6 @@ use std::fs::File;
 use std::io::{self, Read, Seek};
 use std::os::fd::{FromRawFd, RawFd};
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::Arc;
 
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject};
 use jni::sys::{jint, jlong};
@@ -21,7 +20,7 @@ const CANCELLED_IO_MESSAGE: &str = "operation cancelled";
 struct CancelableReader {
     inner: File,
     cancel: GlobalRef,
-    vm: Arc<JavaVM>,
+    vm: JavaVM,  // JavaVM is already cheaply cloneable, no Arc needed
 }
 
 impl CancelableReader {
@@ -63,7 +62,7 @@ impl Seek for CancelableReader {
 
 struct JniReporter {
     listener: GlobalRef,
-    vm: Arc<JavaVM>,
+    vm: JavaVM,  // JavaVM is already cheaply cloneable, no Arc needed
 }
 
 impl ProgressReporter for JniReporter {
@@ -174,20 +173,24 @@ fn native_encrypt_impl(
 
     let password_bytes = match env.convert_byte_array(password) {
         Ok(b) => b,
-        Err(_) => return fail_with_exception(env, password, 2, "Failed to read passphrase."),
+        Err(_) => {
+            return fail_with_exception(env, password, 2, "Failed to read passphrase.");
+        }
     };
     let password_bytes = Zeroizing::new(password_bytes);
 
-    let vm = Arc::new(vm);
+    let vm_for_reader = vm.clone();
+    let vm_for_reporter = vm.clone();
+
     let mut reader = CancelableReader {
         inner: input_file,
         cancel: cancel_ref,
-        vm: Arc::clone(&vm),
+        vm: vm_for_reader,
     };
 
     let reporter = JniReporter {
         listener: listener_ref,
-        vm: Arc::clone(&vm),
+        vm: vm_for_reporter,
     };
     let throttled = ThrottledReporter::new(&reporter);
 
@@ -204,6 +207,8 @@ fn native_encrypt_impl(
         size_opt,
         &throttled,
     );
+
+    // GlobalRefs are automatically released when reader/reporter are dropped here
 
     zero_java_array(env, password);
 
@@ -251,20 +256,24 @@ fn native_decrypt_impl(
 
     let password_bytes = match env.convert_byte_array(password) {
         Ok(b) => b,
-        Err(_) => return fail_with_exception(env, password, 2, "Failed to read passphrase."),
+        Err(_) => {
+            return fail_with_exception(env, password, 2, "Failed to read passphrase.");
+        }
     };
     let password_bytes = Zeroizing::new(password_bytes);
 
-    let vm = Arc::new(vm);
+    let vm_for_reader = vm;
+    let vm_for_reporter = vm;
+
     let mut reader = CancelableReader {
         inner: input_file,
         cancel: cancel_ref,
-        vm: Arc::clone(&vm),
+        vm: vm_for_reader,
     };
 
     let reporter = JniReporter {
         listener: listener_ref,
-        vm: Arc::clone(&vm),
+        vm: vm_for_reporter,
     };
     let throttled = ThrottledReporter::new(&reporter);
 
@@ -281,6 +290,8 @@ fn native_decrypt_impl(
         size_opt,
         &throttled,
     );
+
+    // GlobalRefs are automatically released when reader/reporter are dropped here
 
     zero_java_array(env, password);
 

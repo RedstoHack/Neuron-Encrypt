@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "neuron-encrypt"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "aead",
  "aes-gcm-siv",
@@ -2525,6 +2525,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 1.0.69",
  "zeroize",
 ]
