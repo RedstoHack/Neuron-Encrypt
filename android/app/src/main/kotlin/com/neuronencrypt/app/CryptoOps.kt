@@ -17,6 +17,7 @@ fun encrypt(
     if (inputFd == null || outputFd == null) {
         inputFd?.close()
         outputFd?.close()
+        zeroByteArray(password)
         return -1
     }
     val sourceSize = inputFd.statSize
@@ -27,7 +28,7 @@ fun encrypt(
     // why only the first file appeared to be encrypted.
     val inputRawFd = inputFd.detachFd()
     val outputRawFd = outputFd.detachFd()
-    return NeuronEncryptNative.nativeEncrypt(
+    val code = NeuronEncryptNative.nativeEncrypt(
         inputRawFd,
         outputRawFd,
         password,
@@ -35,6 +36,8 @@ fun encrypt(
         listener,
         cancelFlag
     )
+    zeroByteArray(password)
+    return code
 }
 
 fun decrypt(
@@ -50,6 +53,7 @@ fun decrypt(
     if (inputFd == null || outputFd == null) {
         inputFd?.close()
         outputFd?.close()
+        zeroByteArray(password)
         return -1
     }
     val sourceSize = inputFd.statSize
@@ -60,7 +64,7 @@ fun decrypt(
     // why only the first file appeared to be encrypted.
     val inputRawFd = inputFd.detachFd()
     val outputRawFd = outputFd.detachFd()
-    return NeuronEncryptNative.nativeDecrypt(
+    val code = NeuronEncryptNative.nativeDecrypt(
         inputRawFd,
         outputRawFd,
         password,
@@ -68,4 +72,10 @@ fun decrypt(
         listener,
         cancelFlag
     )
+    zeroByteArray(password)
+    return code
+}
+
+private fun zeroByteArray(bytes: ByteArray) {
+    java.util.Arrays.fill(bytes, 0)
 }

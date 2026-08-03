@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neuronencrypt.app.*
 import com.neuronencrypt.app.ui.theme.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -131,19 +132,25 @@ fun SingleFileScreen(
             scope.launch {
                 val startTime = System.currentTimeMillis()
                 val passwordBytes = password.toByteArray()
+                var lastNotifyMs = 0L
                 val listener = object : ProgressListener {
                     override fun onProgress(fraction: Float, stage: String) {
                         scope.launch {
                             status = ProcessStatus.Running(fraction, stage)
-                            // Update notification progress
-                            val progress = (fraction * 100).toInt().coerceIn(0, 100)
-                            val updateIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                                setAction(com.neuronencrypt.app.CryptoService.ACTION_UPDATE)
-                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName as String)
-                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
-                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_PROGRESS, progress)
+                            // Throttle notification updates to avoid flooding the
+                            // main queue with a service start per progress tick
+                            val now = System.currentTimeMillis()
+                            if (now - lastNotifyMs >= 250L) {
+                                lastNotifyMs = now
+                                val progress = (fraction * 100).toInt().coerceIn(0, 100)
+                                val updateIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
+                                    setAction(com.neuronencrypt.app.CryptoService.ACTION_UPDATE)
+                                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName as String)
+                                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
+                                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_PROGRESS, progress)
+                                }
+                                androidx.core.content.ContextCompat.startForegroundService(context, updateIntent)
                             }
-                            androidx.core.content.ContextCompat.startForegroundService(context, updateIntent)
                         }
                     }
                 }
@@ -174,11 +181,23 @@ fun SingleFileScreen(
                         confirmPassword = ""
                     } else {
                         deleteDocumentQuietly(context, uri)
-                        status = ProcessStatus.Error("JNI execution returned error code: $code")
+                        val cancelled = cancelFlag.get()
+                        status = ProcessStatus.Error(
+                            if (cancelled) "Operation cancelled" else "JNI execution returned error code: $code"
+                        )
                     }
+                } catch (e: CancellationException) {
+                    // Never swallow cancellation: the JNI call already ran to
+                    // completion on the IO thread, so leaving the (possibly
+                    // finished) output file in place is up to the caller. The
+                    // finally block below still stops the service.
+                    throw e
                 } catch (e: Exception) {
                     deleteDocumentQuietly(context, uri)
-                    status = ProcessStatus.Error(e.message ?: "Operation failed with unexpected exception")
+                    val cancelled = cancelFlag.get()
+                    status = ProcessStatus.Error(
+                        if (cancelled) "Operation cancelled" else (e.message ?: "Operation failed with unexpected exception")
+                    )
                 } finally {
                     password = ""
                     confirmPassword = ""

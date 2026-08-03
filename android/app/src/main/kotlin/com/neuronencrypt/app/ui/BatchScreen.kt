@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neuronencrypt.app.*
 import com.neuronencrypt.app.ui.theme.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -166,6 +167,10 @@ fun BatchScreen(onBack: () -> Unit) {
                             item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
                             item.error = if (cancelFlag.get()) "Cancelled" else "Native error code: $code"
                         }
+                    } catch (e: CancellationException) {
+                        // Re-raise so cancelled coroutines never mark files as
+                        // failed or delete outputs after the fact.
+                        throw e
                     } catch (e: Exception) {
                         outUri?.let { deleteDocumentQuietly(context, it) }
                         item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
