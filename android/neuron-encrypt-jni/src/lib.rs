@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek};
 use std::os::fd::{FromRawFd, RawFd};
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::Arc;
 
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject};
 use jni::sys::{jint, jlong};
@@ -20,7 +21,7 @@ const CANCELLED_IO_MESSAGE: &str = "operation cancelled";
 struct CancelableReader {
     inner: File,
     cancel: GlobalRef,
-    vm: JavaVM,  // JavaVM is already cheaply cloneable, no Arc needed
+    vm: Arc<JavaVM>,
 }
 
 impl CancelableReader {
@@ -62,7 +63,7 @@ impl Seek for CancelableReader {
 
 struct JniReporter {
     listener: GlobalRef,
-    vm: JavaVM,  // JavaVM is already cheaply cloneable, no Arc needed
+    vm: Arc<JavaVM>,
 }
 
 impl ProgressReporter for JniReporter {
@@ -153,7 +154,7 @@ fn native_encrypt_impl(
     let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
 
     let vm = match env.get_java_vm() {
-        Ok(v) => v,
+        Ok(v) => Arc::new(v),
         Err(_) => return fail_with_exception(env, password, 1, "Failed to access JVM."),
     };
 
@@ -179,18 +180,15 @@ fn native_encrypt_impl(
     };
     let password_bytes = Zeroizing::new(password_bytes);
 
-    let vm_for_reader = vm.clone();
-    let vm_for_reporter = vm.clone();
-
     let mut reader = CancelableReader {
         inner: input_file,
         cancel: cancel_ref,
-        vm: vm_for_reader,
+        vm: Arc::clone(&vm),
     };
 
     let reporter = JniReporter {
         listener: listener_ref,
-        vm: vm_for_reporter,
+        vm: Arc::clone(&vm),
     };
     let throttled = ThrottledReporter::new(&reporter);
 
@@ -236,7 +234,7 @@ fn native_decrypt_impl(
     let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
 
     let vm = match env.get_java_vm() {
-        Ok(v) => v,
+        Ok(v) => Arc::new(v),
         Err(_) => return fail_with_exception(env, password, 1, "Failed to access JVM."),
     };
 
@@ -262,18 +260,15 @@ fn native_decrypt_impl(
     };
     let password_bytes = Zeroizing::new(password_bytes);
 
-    let vm_for_reader = vm;
-    let vm_for_reporter = vm;
-
     let mut reader = CancelableReader {
         inner: input_file,
         cancel: cancel_ref,
-        vm: vm_for_reader,
+        vm: Arc::clone(&vm),
     };
 
     let reporter = JniReporter {
         listener: listener_ref,
-        vm: vm_for_reporter,
+        vm: Arc::clone(&vm),
     };
     let throttled = ThrottledReporter::new(&reporter);
 
