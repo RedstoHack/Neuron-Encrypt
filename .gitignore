@@ -4,14 +4,13 @@
 fix_*.py
 gui_part*.txt
 fix_*.txt
-  
-# Local cargo config  
-neuron-encrypt/.cargo/config.toml  
+
+# Local cargo config
+neuron-encrypt/.cargo/config.toml
 
 # Build artifacts that should not be committed
 jdk-17.0.12+7/
 gradle-8.5/
 gradle-home/
 local-maven-repo/
-offline-gmaven-stable.zip# Local cargo config  
-neuron-encrypt/.cargo/config.toml  
+offline-gmaven-stable.zip

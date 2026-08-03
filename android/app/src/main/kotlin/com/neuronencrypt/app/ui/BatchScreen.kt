@@ -117,77 +117,106 @@ fun BatchScreen(onBack: () -> Unit) {
             scope.launch {
                 val items = selectedFiles.map { it.copy() }
                 val total = items.size
+                val passwordBytes = password.toByteArray()
 
                 val parentDocId = DocumentsContract.getTreeDocumentId(treeUri)
                 val parentDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId)
 
-                for (i in 0 until total) {
-                    if (cancelFlag.get()) {
-                        items[i].status = "Cancelled"
-                        continue
-                    }
+                // Keep the process alive if the app is backgrounded mid-batch
+                val action = if (fileMode == FileMode.Encrypt) "Encrypting" else "Decrypting"
+                val serviceIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
+                    setAction(com.neuronencrypt.app.CryptoService.ACTION_START)
+                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, "Batch ($total files)")
+                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
+                }
+                androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
 
-                    val item = items[i]
-                    item.status = "Processing"
-                    batchStatus = BatchStatus.Processing(i, total, item.name, "Initializing...", 0f)
-
-                    val defaultName = defaultOutputName(fileMode, item.name)
-
-                    var outUri: Uri? = null
-                    try {
-                        outUri = DocumentsContract.createDocument(
-                            context.contentResolver,
-                            parentDocUri,
-                            "*/*",
-                            defaultName
-                        )
-
-                        if (outUri == null) {
-                            item.status = "Failed"
-                            item.error = "Could not create destination file"
+                var lastNotifyMs = 0L
+                try {
+                    for (i in 0 until total) {
+                        if (cancelFlag.get()) {
+                            items[i].status = "Cancelled"
                             continue
                         }
 
-                        val passwordBytes = password.toByteArray()
-                        val listener = object : ProgressListener {
-                            override fun onProgress(fraction: Float, stage: String) {
-                                scope.launch {
-                                    item.progress = fraction
-                                    batchStatus = BatchStatus.Processing(i, total, item.name, stage, fraction)
+                        val item = items[i]
+                        item.status = "Processing"
+                        batchStatus = BatchStatus.Processing(i, total, item.name, "Initializing...", 0f)
+
+                        val defaultName = defaultOutputName(fileMode, item.name)
+
+                        var outUri: Uri? = null
+                        try {
+                            outUri = DocumentsContract.createDocument(
+                                context.contentResolver,
+                                parentDocUri,
+                                "*/*",
+                                defaultName
+                            )
+
+                            if (outUri == null) {
+                                item.status = "Failed"
+                                item.error = "Could not create destination file"
+                                continue
+                            }
+
+                            val listener = object : ProgressListener {
+                                override fun onProgress(fraction: Float, stage: String) {
+                                    scope.launch {
+                                        item.progress = fraction
+                                        batchStatus = BatchStatus.Processing(i, total, item.name, stage, fraction)
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastNotifyMs >= 250L) {
+                                            lastNotifyMs = now
+                                            val progress = (fraction * 100).toInt().coerceIn(0, 100)
+                                            val updateIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
+                                                setAction(com.neuronencrypt.app.CryptoService.ACTION_UPDATE)
+                                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, item.name as String)
+                                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
+                                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_PROGRESS, progress)
+                                            }
+                                            androidx.core.content.ContextCompat.startForegroundService(context, updateIntent)
+                                        }
+                                    }
                                 }
                             }
-                        }
 
-                        val code = withContext(Dispatchers.IO) {
-                        if (fileMode == FileMode.Encrypt) {
-                            encrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
-                        } else {
-                            decrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
-                        }
-                    }
+                            val code = withContext(Dispatchers.IO) {
+                                if (fileMode == FileMode.Encrypt) {
+                                    encrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
+                                } else {
+                                    decrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
+                                }
+                            }
 
-                        if (code == 0) {
-                            item.status = "Success"
-                        } else {
-                            deleteDocumentQuietly(context, outUri)
+                            if (code == 0) {
+                                item.status = "Success"
+                            } else {
+                                deleteDocumentQuietly(context, outUri)
+                                item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
+                                item.error = if (cancelFlag.get()) "Cancelled" else "Native error code: $code"
+                            }
+                        } catch (e: CancellationException) {
+                            // Re-raise so cancelled coroutines never mark files as
+                            // failed or delete outputs after the fact.
+                            throw e
+                        } catch (e: Exception) {
+                            outUri?.let { deleteDocumentQuietly(context, it) }
                             item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
-                            item.error = if (cancelFlag.get()) "Cancelled" else "Native error code: $code"
+                            item.error = if (cancelFlag.get()) "Cancelled" else e.message ?: "Unknown error"
                         }
-                    } catch (e: CancellationException) {
-                        // Re-raise so cancelled coroutines never mark files as
-                        // failed or delete outputs after the fact.
-                        throw e
-                    } catch (e: Exception) {
-                        outUri?.let { deleteDocumentQuietly(context, it) }
-                        item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
-                        item.error = if (cancelFlag.get()) "Cancelled" else e.message ?: "Unknown error"
                     }
+                } finally {
+                    // Clear passwords and stop the foreground service on every exit path
+                    java.util.Arrays.fill(passwordBytes, 0)
+                    password = ""
+                    confirmPassword = ""
+                    cancelFlag.set(false)
+                    val stopIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
+                        setAction(com.neuronencrypt.app.CryptoService.ACTION_STOP)
+                    }
+                    context.stopService(stopIntent)
                 }
-
-                // Clear passwords
-                password = ""
-                confirmPassword = ""
-                cancelFlag.set(false)
                 batchStatus = BatchStatus.Done(items)
             }
         }

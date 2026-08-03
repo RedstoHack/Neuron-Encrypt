@@ -55,6 +55,7 @@ sealed class ProcessStatus {
         val isWiped: Boolean = false
     ) : ProcessStatus()
     data class Error(val message: String) : ProcessStatus()
+    object Cancelled : ProcessStatus()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -190,10 +191,11 @@ fun SingleFileScreen(
                         confirmPassword = ""
                     } else {
                         deleteDocumentQuietly(context, uri)
-                        val cancelled = cancelFlag.get()
-                        status = ProcessStatus.Error(
-                            if (cancelled) "Operation cancelled" else "JNI execution returned error code: $code"
-                        )
+                        if (cancelFlag.get()) {
+                            status = ProcessStatus.Cancelled
+                        } else {
+                            status = ProcessStatus.Error("JNI execution returned error code: $code")
+                        }
                     }
                 } catch (e: CancellationException) {
                     // Never swallow cancellation: the JNI call already ran to
@@ -203,11 +205,14 @@ fun SingleFileScreen(
                     throw e
                 } catch (e: Exception) {
                     deleteDocumentQuietly(context, uri)
-                    val cancelled = cancelFlag.get()
-                    status = ProcessStatus.Error(
-                        if (cancelled) "Operation cancelled" else (e.message ?: "Operation failed with unexpected exception")
-                    )
+                    if (cancelFlag.get()) {
+                        status = ProcessStatus.Cancelled
+                    } else {
+                        status = ProcessStatus.Error(e.message ?: "Operation failed with unexpected exception")
+                    }
                 } finally {
+                    // Zero the passphrase bytes and drop the Compose String state
+                    java.util.Arrays.fill(passwordBytes, 0)
                     password = ""
                     confirmPassword = ""
                     cancelFlag.set(false)
@@ -246,7 +251,7 @@ fun SingleFileScreen(
                 .verticalScroll(scrollState)
                 .padding(24.dp)
         ) {
-            if (status is ProcessStatus.Idle || status is ProcessStatus.Error) {
+            if (status is ProcessStatus.Idle || status is ProcessStatus.Error || status is ProcessStatus.Cancelled) {
                 // File Picker trigger box
                 Card(
                     modifier = Modifier
@@ -487,6 +492,25 @@ fun SingleFileScreen(
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             Text((status as ProcessStatus.Error).message, color = TextHi, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+
+                // Cancelled display
+                if (status is ProcessStatus.Cancelled) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Surface(
+                        color = Warning.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.border(1.dp, Warning, RoundedCornerShape(8.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Cancel, contentDescription = "Cancelled", tint = Warning)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Operation cancelled", color = TextHi, style = MaterialTheme.typography.titleMedium)
                         }
                     }
                 }
