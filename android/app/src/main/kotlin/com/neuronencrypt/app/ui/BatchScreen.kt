@@ -83,17 +83,23 @@ fun BatchScreen(onBack: () -> Unit) {
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            val list = uris.map { uri ->
-                persistUriPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val info = getFileInfo(context, uri)
-                BatchItem(uri = uri, name = info.first, size = info.second)
-            }
-            selectedFiles = list
+            // Query the provider off the main thread: metadata lookups can be
+            // slow on remote providers and would otherwise freeze the UI.
+            scope.launch(Dispatchers.IO) {
+                val list = uris.map { uri ->
+                    persistUriPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    val info = getFileInfo(context, uri)
+                    BatchItem(uri = uri, name = info.first, size = info.second)
+                }
+                withContext(Dispatchers.Main) {
+                    selectedFiles = list
 
-            // Auto-detect mode based on files
-            val vx2Count = list.count { it.name.endsWith(".vx2", ignoreCase = true) }
-            fileMode = if (vx2Count > list.size / 2) FileMode.Decrypt else FileMode.Encrypt
-            batchStatus = BatchStatus.Idle
+                    // Auto-detect mode based on files
+                    val vx2Count = list.count { it.name.endsWith(".vx2", ignoreCase = true) }
+                    fileMode = if (vx2Count > list.size / 2) FileMode.Decrypt else FileMode.Encrypt
+                    batchStatus = BatchStatus.Idle
+                }
+            }
         }
     }
 

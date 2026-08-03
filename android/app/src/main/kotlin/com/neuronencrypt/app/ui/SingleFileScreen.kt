@@ -83,19 +83,28 @@ fun SingleFileScreen(
 
     // Helpers to query info and magic
     fun selectFile(uri: Uri) {
-        persistUriPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Update the UI immediately; query the provider off the main thread so
+        // a slow/remote storage provider (e.g. Drive) can't freeze the UI.
         inputUri = uri
-        val info = getFileInfo(context, uri)
-        inputName = info.first
-        inputSize = info.second
-        val magic = detectMagicBytes(context, uri)
-        detectedMagic = magic
-        if (magic == "VAULTX02" || magic == "VAULTX03" || magic == "VAULTX04") {
-            fileMode = FileMode.Decrypt
-        } else {
-            fileMode = FileMode.Encrypt
-        }
         status = ProcessStatus.Idle
+        scope.launch(Dispatchers.IO) {
+            persistUriPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val info = getFileInfo(context, uri)
+            val magic = detectMagicBytes(context, uri)
+            withContext(Dispatchers.Main) {
+                // Ignore stale results if the user picked another file meanwhile
+                if (inputUri == uri) {
+                    inputName = info.first
+                    inputSize = info.second
+                    detectedMagic = magic
+                    fileMode = if (magic == "VAULTX02" || magic == "VAULTX03" || magic == "VAULTX04") {
+                        FileMode.Decrypt
+                    } else {
+                        FileMode.Encrypt
+                    }
+                }
+            }
+        }
     }
 
     // Handle sharedUri on initial load

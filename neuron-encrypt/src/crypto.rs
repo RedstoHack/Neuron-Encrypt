@@ -1296,6 +1296,8 @@ fn decrypt_stream_v3<R: Read, W: Write>(
     let mut buf = Zeroizing::new(vec![0u8; CHUNK_SIZE + TAG_LEN]);
     let mut bytes_done: u64 = 0;
     let mut last_chunk: Option<Zeroizing<Vec<u8>>> = None;
+    let mut chunk_counter: u64 = 0;
+    const IO_GOVERNOR_INTERVAL: u64 = 100;
 
     loop {
         let n = read_exact_or_eof(reader, &mut buf)?;
@@ -1320,6 +1322,16 @@ fn decrypt_stream_v3<R: Read, W: Write>(
                     .map_err(|_| CryptoError::DecryptionFailed)?,
             );
             writer.write_all(pt.as_slice())?;
+            chunk_counter += 1;
+
+            // I/O Governor: periodically flush written plaintext so the kernel
+            // page cache never holds the whole file. Keeps the final sync fast
+            // and prevents the UI from claiming 100% while gigabytes of data
+            // are still being written back to slow storage.
+            if chunk_counter.is_multiple_of(IO_GOVERNOR_INTERVAL) {
+                writer.flush()?;
+                std::thread::sleep(Duration::from_millis(5));
+            }
         }
 
         bytes_done += n as u64;
@@ -1368,6 +1380,8 @@ fn decrypt_stream_v4<R: Read, W: Write>(
     let mut buf = Zeroizing::new(vec![0u8; CHUNK_SIZE + TAG_LEN]);
     let mut bytes_done: u64 = 0;
     let mut last_chunk: Option<Zeroizing<Vec<u8>>> = None;
+    let mut chunk_counter: u64 = 0;
+    const IO_GOVERNOR_INTERVAL: u64 = 100;
 
     loop {
         let n = read_exact_or_eof(reader, &mut buf)?;
@@ -1395,6 +1409,15 @@ fn decrypt_stream_v4<R: Read, W: Write>(
                     .map_err(|_| CryptoError::DecryptionFailed)?,
             );
             writer.write_all(pt.as_slice())?;
+            chunk_counter += 1;
+
+            // I/O Governor: same rationale as decrypt_stream_v3 — keep kernel
+            // dirty pages bounded so completion is only reported once the data
+            // is actually on disk.
+            if chunk_counter.is_multiple_of(IO_GOVERNOR_INTERVAL) {
+                writer.flush()?;
+                std::thread::sleep(Duration::from_millis(5));
+            }
         }
 
         bytes_done += n as u64;

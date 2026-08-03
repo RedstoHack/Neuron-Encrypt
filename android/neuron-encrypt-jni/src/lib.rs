@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, Read, Seek};
+use std::io::{self, Read, Seek, Write};
 use std::os::fd::{FromRawFd, RawFd};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
@@ -17,6 +17,26 @@ use zeroize::Zeroizing;
 
 const EXCEPTION_CLASS: &str = "com/neuronencrypt/app/NeuronEncryptException";
 const CANCELLED_IO_MESSAGE: &str = "operation cancelled";
+
+/// Wraps the output file so that `flush()` also makes the data durable before
+/// the stream layer broadcasts its final 100% progress. Without this, the app
+/// could report "complete" while the kernel page cache was still writing back
+/// the last buffered data (visible as "100% but still working" on slow flash).
+struct DurableFile(File);
+
+impl Write for DurableFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()?;
+        // Best-effort: some storage providers reject fsync; durability is a
+        // guarantee we try to provide, not a failure condition.
+        let _ = self.0.sync_data();
+        Ok(())
+    }
+}
 
 struct CancelableReader {
     inner: File,
@@ -151,7 +171,7 @@ fn native_encrypt_impl(
     // Wrap fds FIRST so they're owned by File and closed on any early return.
     // CryptoService.kt calls detachFd() before this JNI call, so we own the fds now.
     let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
-    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
+    let mut output_file = DurableFile(unsafe { File::from_raw_fd(output_fd as RawFd) });
 
     let vm = match env.get_java_vm() {
         Ok(v) => Arc::new(v),
@@ -211,7 +231,12 @@ fn native_encrypt_impl(
     zero_java_array(env, password);
 
     match run_result {
-        Ok(()) => 0,
+        Ok(()) => {
+            // Full durability (metadata included) once the data is already
+            // synced by DurableFile::flush — best-effort, same as above.
+            let _ = output_file.0.sync_all();
+            0
+        }
         Err(e) => map_error(env, e),
     }
 }
@@ -231,7 +256,7 @@ fn native_decrypt_impl(
 
     // Wrap fds FIRST — see native_encrypt_impl for the rationale.
     let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
-    let mut output_file = unsafe { File::from_raw_fd(output_fd as RawFd) };
+    let mut output_file = DurableFile(unsafe { File::from_raw_fd(output_fd as RawFd) });
 
     let vm = match env.get_java_vm() {
         Ok(v) => Arc::new(v),
@@ -291,7 +316,12 @@ fn native_decrypt_impl(
     zero_java_array(env, password);
 
     match run_result {
-        Ok(()) => 0,
+        Ok(()) => {
+            // Full durability (metadata included) once the data is already
+            // synced by DurableFile::flush — best-effort, same as above.
+            let _ = output_file.0.sync_all();
+            0
+        }
         Err(e) => map_error(env, e),
     }
 }
