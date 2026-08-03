@@ -35,7 +35,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neuronencrypt.app.*
 import com.neuronencrypt.app.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
@@ -147,10 +149,13 @@ fun SingleFileScreen(
                 }
 
                 try {
-                    val code = if (fileMode == FileMode.Encrypt) {
-                        encrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
-                    } else {
-                        decrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
+                    // Run crypto on IO dispatcher to avoid blocking the main thread
+                    val code = withContext(Dispatchers.IO) {
+                        if (fileMode == FileMode.Encrypt) {
+                            encrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
+                        } else {
+                            decrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
+                        }
                     }
 
                     if (code == 0) {

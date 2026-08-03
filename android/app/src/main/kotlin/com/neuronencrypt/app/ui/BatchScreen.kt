@@ -34,7 +34,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neuronencrypt.app.*
 import com.neuronencrypt.app.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
@@ -149,11 +151,13 @@ fun BatchScreen(onBack: () -> Unit) {
                             }
                         }
 
-                        val code = if (fileMode == FileMode.Encrypt) {
+                        val code = withContext(Dispatchers.IO) {
+                        if (fileMode == FileMode.Encrypt) {
                             encrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
                         } else {
                             decrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
                         }
+                    }
 
                         if (code == 0) {
                             item.status = "Success"
