@@ -155,10 +155,12 @@ fun SingleFileScreen(
 
                     if (code == 0) {
                         val duration = System.currentTimeMillis() - startTime
-                        val outInfo = getFileInfo(context, uri)
+                        // Use known output name and size instead of querying ContentResolver
+                        // which can fail for newly created documents
+                        val outputName = defaultOutputName(fileMode, inputName)
                         status = ProcessStatus.Success(
                             inputName = inputName,
-                            outputName = outInfo.first,
+                            outputName = outputName,
                             durationMs = duration,
                             sizeBytes = inputSize
                         )
