@@ -5,6 +5,28 @@ All notable changes to Neuron Encrypt are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] — 2026-08-03
+
+### Fixed
+- **Android ANR on older phones**: Crypto now runs on `Dispatchers.IO` instead of the main thread. Provider metadata queries (`getFileInfo`, `detectMagicBytes`, `persistUriPermission`) were also moved off the main thread in the single-file and batch pickers, so slow/remote providers (e.g. Drive) can no longer freeze or ANR the UI.
+- **"100% complete while still encrypting"**: The JNI output is now wrapped in a `DurableFile` whose `flush()` performs `sync_data()` before the stream layer broadcasts the final 100%, plus a final best-effort `sync_all`. The app no longer reports completion while data is still sitting in the kernel page cache.
+- **CancellationException swallowed**: Navigating away mid-operation previously deleted the (possibly finished) output file and showed a spurious error. `CancellationException` is now re-thrown in both screens instead of being treated as a failure.
+- **V3/V4 decrypt dirty-page backlog**: Added the I/O governor (periodic flush every 100 chunks) to `decrypt_stream_v3`/`decrypt_stream_v4`, mirroring `encrypt_stream`, so the final sync is fast and dirty pages stay bounded.
+- **Round icon crash on API 24/25**: `@mipmap/ic_launcher_round` only existed as an adaptive icon in `anydpi-v26`. Added vector fallbacks to all density folders.
+
+### Changed
+- **Batch mode now runs under the foreground service**: The batch screen starts `CryptoService` for the duration of the batch (with throttled notification progress) and stops it on every exit path, so the process survives backgrounding mid-batch.
+- **Proper Cancelled state**: Single-file cancel now shows a neutral "Operation cancelled" notice instead of a red error box.
+- **Passphrase hygiene**: Batch hoists the passphrase to a single `ByteArray` converted once before the loop; both screens zero the byte array in `finally` on top of the native-side zeroing.
+- **Version bump** 2.1.0 → 2.1.1 (core + JNI crates, Android `versionName`).
+
+### Housekeeping
+- Removed the accidentally-committed `offline-gmaven-stable.zip` (already gitignored) and fixed the mangled `.gitignore` tail.
+
+### Test Results
+- `cargo test --lib`: 38/38 pass.
+- `:app:compileStandardDebugKotlin` and `:app:processStandardDebugResources` clean.
+
 ## [2.1.0] — 2026-07-16
 
 ### Security
@@ -67,5 +89,6 @@ Initial public release.
 - CLI with piping, JSON output, shell completions
 - 100% Safe Rust, `Zeroizing<T>` memory hygiene, `OsRng` CSPRNG
 
+[2.1.1]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases
 [2.1.0]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases
 [2.0.0]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases

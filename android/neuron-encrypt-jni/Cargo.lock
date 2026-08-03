@@ -2532,7 +2532,7 @@ dependencies = [
 
 [[package]]
 name = "neuron-encrypt-jni"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "jni 0.21.1",
  "neuron-encrypt",

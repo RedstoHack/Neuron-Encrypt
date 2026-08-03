@@ -37,7 +37,16 @@ Neuron Encrypt is a native Android application that integrates the core Rust cry
 ## Security Mitigations
 - **Zero Internet Permissions**: The Android app does not request `android.permission.INTERNET`. No networking is compiled in, ensuring complete air-gapped isolation of your files.
 - **No External Storage Permissions**: Operating exclusively through SAF ensures that Neuron Encrypt never accesses other private files or databases on your device.
-- **Zeroized Memory**: Passphrase byte arrays converted from JNI are wrapped in Rust's `Zeroizing<T>` container. In addition, the JNI bridge explicitly zeros out the JVM's `ByteArray` memory region before returning, preventing secrets from remaining in Java's heap.
+- **Zeroized Memory**: Passphrase byte arrays converted from JNI are wrapped in Rust's `Zeroizing<T>` container. In addition, the JNI bridge explicitly zeros out the JVM's `ByteArray` memory region before returning, preventing secrets from remaining in Java's heap. The Kotlin screens also zero their passphrase byte arrays in a `finally` block and clear the Compose `String` state after each operation.
+
+---
+
+## Reliability
+
+- **Crypto runs off the main thread** — encrypt/decrypt execute on `Dispatchers.IO`, and provider metadata queries (`getFileInfo`, `detectMagicBytes`, URI permission persistence) were moved off the UI thread too, preventing ANR on slow or remote storage providers.
+- **Foreground service** — single-file **and** batch operations run under `CryptoService`, so the process survives being backgrounded mid-operation. The notification shows throttled progress and is stopped on every exit path (done, cancelled, or exception).
+- **"100%" means durable** — the JNI output is wrapped in a `DurableFile` whose `flush()` calls `sync_data()` before the stream layer reports 100%, plus a final best-effort `sync_all()`. The app never reports completion while data is still in the kernel page cache.
+- **Cancellation is safe** — `CancellationException` is re-thrown (never swallowed) so navigating away mid-op can't delete a finished output file, and cancelling shows a neutral "Operation cancelled" state rather than an error.
 
 ---
 

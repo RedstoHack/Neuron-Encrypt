@@ -6,7 +6,7 @@
 
 AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
-[![Version](https://img.shields.io/badge/version-2.1.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
+[![Version](https://img.shields.io/badge/version-2.1.1-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![crates.io](https://img.shields.io/crates/v/neuron-encrypt?style=flat-square&logo=rust&label=crates.io)](https://crates.io/crates/neuron-encrypt)
@@ -43,6 +43,16 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 - **🌍 4 platforms** — Windows, macOS, Linux, Android 7.0+ (all from one Rust codebase)
 - **🔇 Offline-first** — Zero network permissions on Android, zero telemetry, zero tracking
 - **📦 Atomic writes** — Output goes to `.tmp` first, then renames. No partial files on crash
+
+---
+
+## What's new in 2.1.1
+
+- **No more hangs on older phones** — crypto runs on a background dispatcher and provider metadata lookups (`getFileInfo` / `detectMagicBytes`) moved off the UI thread, so slow/remote storage (e.g. Drive) can't freeze or ANR the app.
+- **100% means done** — the Android JNI `fsync`s before reporting completion, so the app never claims finished while data is still being written back to slow storage.
+- **Batch survives backgrounding** — batch operations now run under a foreground service with notification progress, just like single-file operations.
+- **Cleaner cancel UX** — cancelling shows a neutral "Operation cancelled" notice instead of a red error.
+- **Tighter passphrase hygiene** — passphrase byte arrays are zeroed in `finally` on top of the native-side zeroing.
 
 ---
 
