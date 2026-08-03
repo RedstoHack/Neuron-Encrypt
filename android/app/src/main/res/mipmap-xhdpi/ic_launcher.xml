@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-API 26 fallback icon (non-adaptive). Matches the adaptive icon design:
+     indigo background with white lock. Used on Android 7.x and earlier. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- Indigo background -->
+    <path
+        android:fillColor="#6366F1"
+        android:pathData="M0,0h48v48h-48z" />
+
+    <!-- Lock shackle (scaled from 108vp foreground) -->
+    <path
+        android:fillColor="#F5F5F5"
+        android:fillType="evenOdd"
+        android:pathData="M19,23 L19,18 C19,14.7 21.7,12 24,12 C26.3,12 29,14.7 29,18 L29,23 L27,23 L27,18 C27,16.3 25.7,15 24,15 C22.3,15 21,16.3 21,18 L21,23 Z" />
+
+    <!-- Lock body -->
+    <path
+        android:fillColor="#F5F5F5"
+        android:pathData="M16,22 L32,22 C32.6,22 33,22.4 33,23 L33,36 C33,36.6 32.6,37 32,37 L16,37 C15.4,37 15,36.6 15,36 L15,23 C15,22.4 15.4,22 16,22 Z" />
+
+    <!-- Keyhole -->
+    <path
+        android:fillColor="#6366F1"
+        android:pathData="M24,26 C22.9,26 22,26.9 22,28 C22,29.1 22.9,30 24,30 C25.1,30 26,29.1 26,28 C26,26.9 25.1,26 24,26 Z" />
+    <path
+        android:fillColor="#6366F1"
+        android:pathData="M23.5,29 L24.5,29 L24.7,33 L23.3,33 Z" />
+</vector>
