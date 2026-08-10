@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::os::fd::{FromRawFd, RawFd};
+
+use libc::dup;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 
@@ -155,6 +157,26 @@ fn fail_with_exception(env: &mut JNIEnv, password: &JByteArray, code: jint, mess
     code
 }
 
+/// Duplicate a file descriptor. On Android the Java side keeps ownership of the
+/// original `ParcelFileDescriptor`, which must stay alive for the whole write so
+/// the content provider receives its close signal only after all bytes are on
+/// disk. Duplicating lets Rust own a private copy that it closes on drop without
+/// invalidating the provider-facing descriptor (see tauri #3356 — detachFd()
+/// caused providers to finalize the file at 0 bytes).
+///
+/// Returns `None` if `dup(2)` fails.
+fn duplicate_fd(fd: jint) -> Option<RawFd> {
+    if fd < 0 {
+        return None;
+    }
+    let duped = unsafe { dup(fd) };
+    if duped < 0 {
+        None
+    } else {
+        Some(duped)
+    }
+}
+
 fn native_encrypt_impl(
     env: &mut JNIEnv,
     input_fd: jint,
@@ -168,10 +190,24 @@ fn native_encrypt_impl(
         return fail_with_exception(env, password, 2, "Invalid file descriptor.");
     }
 
-    // Wrap fds FIRST so they're owned by File and closed on any early return.
-    // CryptoService.kt calls detachFd() before this JNI call, so we own the fds now.
-    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
-    let mut output_file = DurableFile(unsafe { File::from_raw_fd(output_fd as RawFd) });
+    // Duplicate (not detach) the fds. The Java side keeps the original
+    // ParcelFileDescriptors open until this call returns, so the content
+    // provider is only told the write finished once the data is actually on
+    // disk. We own the dup'd copies here and close them on drop.
+    let input_dup = match duplicate_fd(input_fd) {
+        Some(fd) => fd,
+        None => return fail_with_exception(env, password, 1, "Failed to duplicate input file descriptor."),
+    };
+    let output_dup = match duplicate_fd(output_fd) {
+        Some(fd) => fd,
+        None => {
+            unsafe { libc::close(input_dup) };
+            return fail_with_exception(env, password, 1, "Failed to duplicate output file descriptor.");
+        }
+    };
+
+    let input_file = unsafe { File::from_raw_fd(input_dup) };
+    let mut output_file = DurableFile(unsafe { File::from_raw_fd(output_dup) });
 
     let vm = match env.get_java_vm() {
         Ok(v) => Arc::new(v),
@@ -254,9 +290,21 @@ fn native_decrypt_impl(
         return fail_with_exception(env, password, 2, "Invalid file descriptor.");
     }
 
-    // Wrap fds FIRST — see native_encrypt_impl for the rationale.
-    let input_file = unsafe { File::from_raw_fd(input_fd as RawFd) };
-    let mut output_file = DurableFile(unsafe { File::from_raw_fd(output_fd as RawFd) });
+    // Duplicate (not detach) the fds — see native_encrypt_impl for the rationale.
+    let input_dup = match duplicate_fd(input_fd) {
+        Some(fd) => fd,
+        None => return fail_with_exception(env, password, 1, "Failed to duplicate input file descriptor."),
+    };
+    let output_dup = match duplicate_fd(output_fd) {
+        Some(fd) => fd,
+        None => {
+            unsafe { libc::close(input_dup) };
+            return fail_with_exception(env, password, 1, "Failed to duplicate output file descriptor.");
+        }
+    };
+
+    let input_file = unsafe { File::from_raw_fd(input_dup) };
+    let mut output_file = DurableFile(unsafe { File::from_raw_fd(output_dup) });
 
     let vm = match env.get_java_vm() {
         Ok(v) => Arc::new(v),
@@ -334,10 +382,11 @@ fn native_decrypt_impl(
 /// via the Java Native Interface. The caller (the JVM) must:
 ///
 /// - Pass valid `input_fd` and `output_fd` values that refer to open OS file
-///   descriptors. The function takes ownership of these fds (via
-///   `File::from_raw_fd`) and will close them on return — the Java side must
-///   have called `ParcelFileDescriptor.detachFd()` to release its ownership
-///   before invoking this function.
+///   descriptors. The function duplicates these fds (via `dup(2)`) and takes
+///   ownership of the duplicates only; the Java side must keep the original
+///   `ParcelFileDescriptor`s open until this function returns (do NOT call
+///   `detachFd()`), so the content provider receives its close signal after
+///   the write completes.
 /// - Pass a non-null `password: JByteArray` reference owned by the current
 ///   JNI frame. The function reads its contents and zeroes the array in-place
 ///   before returning.

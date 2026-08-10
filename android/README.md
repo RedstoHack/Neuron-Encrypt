@@ -15,9 +15,9 @@ Neuron Encrypt is a native Android application that integrates the core Rust cry
 ┌────────────────────────────────────────────────────────┐
 │                   Kotlin Coroutines                    │
 │   · Resolves SAF Document URIs                         │
-│   · Obtains raw file descriptors (detachFd())           │
+│   · Passes raw fds (kept open, NOT detached)           │
 └───────────────────────────┬────────────────────────────┘
-                            │ (Raw FDs, GlobalRefs)
+                            │ (FD ints, GlobalRefs)
                             ▼
 ┌────────────────────────────────────────────────────────┐
 │                   Rust JNI wrapper                     │
@@ -28,7 +28,7 @@ Neuron Encrypt is a native Android application that integrates the core Rust cry
 ```
 
 ### JNI Interoperability
-- **File Descriptor Sharing**: Android uses the Storage Access Framework (SAF) to restrict file system access. The Kotlin app requests document access from the OS, obtains `ParcelFileDescriptor`, and calls `detachFd()` to transfer file ownership to the Rust JNI layer. The JNI layer reconstructs standard `std::fs::File` objects from the raw file descriptors.
+- **File Descriptor Sharing**: Android uses the Storage Access Framework (SAF) to restrict file system access. The Kotlin app requests document access from the OS, obtains `ParcelFileDescriptor`, and passes the raw fd ints to the Rust JNI layer **without detaching them**. The JNI layer `dup()`s each fd and reconstructs standard `std::fs::File` objects from the duplicates. The Java-side `ParcelFileDescriptor`s stay open for the full operation and are closed only after the write completes, so the content provider receives its close signal once all bytes are actually on disk (calling `detachFd()` instead caused providers to finalize files at 0 bytes — see tauri #3356).
 - **Cancellation Hook**: Because Rust's cryptographic engine runs in a continuous stream loop, cancellation is implemented at the I/O layer. The Rust reader (`CancelableReader`) wraps the input file and checks the state of the Kotlin `AtomicBoolean` on every single block read/write operation. If cancelled, it throws an `io::ErrorKind::Interrupted` error, halting the operation instantly.
 - **Progress Updates**: The Rust streaming engine implements `ProgressReporter` through `JniReporter`, which makes reflective calls back to the Kotlin `ProgressListener.onProgress(fraction, stage)`. It is wrapped in a `ThrottledReporter` to avoid clogging the JVM JNI bridge with excessive UI refresh requests.
 

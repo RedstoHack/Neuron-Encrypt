@@ -6,7 +6,7 @@
 
 AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
-[![Version](https://img.shields.io/badge/version-2.1.1-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
+[![Version](https://img.shields.io/badge/version-2.1.2-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![crates.io](https://img.shields.io/crates/v/neuron-encrypt?style=flat-square&logo=rust&label=crates.io)](https://crates.io/crates/neuron-encrypt)
@@ -43,6 +43,13 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 - **🌍 4 platforms** — Windows, macOS, Linux, Android 7.0+ (all from one Rust codebase)
 - **🔇 Offline-first** — Zero network permissions on Android, zero telemetry, zero tracking
 - **📦 Atomic writes** — Output goes to `.tmp` first, then renames. No partial files on crash
+
+---
+
+## What's new in 2.1.2
+
+- **Fixed: empty files from Drive/cloud storage** — Android no longer detaches the file descriptor before encryption finishes, so files from remote storage (Drive, etc.) come out intact instead of 0 bytes. Native code now duplicates the fd and owns its own copy, so the app can never report "done" while data is still being flushed.
+- **Cleaner Android back navigation** — the new predictive-back callback is enabled, removing a warning in recent Android versions.
 
 ---
 

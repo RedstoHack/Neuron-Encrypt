@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "neuron-encrypt"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "aead",
  "aes-gcm-siv",
@@ -2532,9 +2532,10 @@ dependencies = [
 
 [[package]]
 name = "neuron-encrypt-jni"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "jni 0.21.1",
+ "libc",
  "neuron-encrypt",
  "zeroize",
 ]

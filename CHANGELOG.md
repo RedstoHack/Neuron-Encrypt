@@ -5,6 +5,20 @@ All notable changes to Neuron Encrypt are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] — 2026-08-10
+
+### Fixed
+- **Empty output files from Drive/cloud storage**: The Android JNI bridge no longer calls `ParcelFileDescriptor.detachFd()` on the input file before encryption/decryption finishes. Detaching signals the content provider that the file is closed early, so the provider finalizes the stream and the output came out as 0 bytes. The Kotlin layer now passes the raw fd, keeps the `ParcelFileDescriptor` open, and closes it in `finally`; the Rust layer duplicates the fd (`dup(2)`) and owns only its own copy. Files from remote providers (e.g. Drive) now come out intact.
+- **Android predictive-back warning**: `android:enableOnBackInvokedCallback` is now enabled on `MainActivity`, removing the "framework flag / component flag" warning on Android 13+.
+
+### Changed
+- **Version bump** 2.1.1 → 2.1.2 (core + JNI crates, Android `versionName`), Android `versionCode` 4 → 5.
+- JNI now depends on `libc` for `dup(2)`.
+
+### Test Results
+- `cargo test --lib`: 38/38 pass (unchanged).
+- Rust code unchanged in behavior on desktop; Android fd handling verified by code review (no emulator available locally — NDK not installed).
+
 ## [2.1.1] — 2026-08-03
 
 ### Fixed
@@ -89,6 +103,7 @@ Initial public release.
 - CLI with piping, JSON output, shell completions
 - 100% Safe Rust, `Zeroizing<T>` memory hygiene, `OsRng` CSPRNG
 
+[2.1.2]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases
 [2.1.1]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases
 [2.1.0]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases
 [2.0.0]: https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases

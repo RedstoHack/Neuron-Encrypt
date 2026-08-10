@@ -7,7 +7,7 @@
 !define PRODUCT_NAME "Neuron Encrypt"
 !define PRODUCT_EXE "neuron-encrypt.exe"
 !define PRODUCT_PUBLISHER "Neuron Encrypt Contributors"
-!define VERSION "2.1.0"
+!define VERSION "2.1.2"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeuronEncrypt"
 !define PRODUCT_UNINST_ROOT_KEY "HKLM"
 !define VX2_CLASS "NeuronEncrypt.vx2file"

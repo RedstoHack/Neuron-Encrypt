@@ -6,7 +6,7 @@
 
 AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
-[![Version](https://img.shields.io/badge/version-2.1.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
+[![Version](https://img.shields.io/badge/version-2.1.2-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![crates.io](https://img.shields.io/crates/v/neuron-encrypt?style=flat-square&logo=rust&label=crates.io)](https://crates.io/crates/neuron-encrypt)

@@ -11,8 +11,8 @@ android {
         applicationId = "com.neuronencrypt.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "2.1.1"
+        versionCode = 5
+        versionName = "2.1.2"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")

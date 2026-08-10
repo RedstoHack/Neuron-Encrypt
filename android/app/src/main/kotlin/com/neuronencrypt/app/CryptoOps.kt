@@ -21,23 +21,26 @@ fun encrypt(
         return -1
     }
     val sourceSize = inputFd.statSize
-    // detachFd() transfers ownership of the raw fds to the native side, which
-    // wraps them in File::from_raw_fd and closes them itself. Closing the same
-    // fd numbers again here double-closes them; on Android 13+ the numbers get
-    // recycled and the second close can crash the process mid-batch, which is
-    // why only the first file appeared to be encrypted.
-    val inputRawFd = inputFd.detachFd()
-    val outputRawFd = outputFd.detachFd()
-    val code = NeuronEncryptNative.nativeEncrypt(
-        inputRawFd,
-        outputRawFd,
-        password,
-        sourceSize,
-        listener,
-        cancelFlag
-    )
-    zeroByteArray(password)
-    return code
+    try {
+        // Pass the raw fds WITHOUT detaching. detachFd() invalidates the Java
+        // ParcelFileDescriptor immediately, so the content provider receives
+        // its close signal before any bytes are written and finalizes the file
+        // at 0 bytes (tauri #3356). The native side dup()s the fds and closes
+        // its own copies; we keep the originals open and close them here only
+        // after the whole write has completed.
+        return NeuronEncryptNative.nativeEncrypt(
+            inputFd.fd,
+            outputFd.fd,
+            password,
+            sourceSize,
+            listener,
+            cancelFlag
+        )
+    } finally {
+        inputFd.close()
+        outputFd.close()
+        zeroByteArray(password)
+    }
 }
 
 fun decrypt(
@@ -57,23 +60,21 @@ fun decrypt(
         return -1
     }
     val sourceSize = inputFd.statSize
-    // detachFd() transfers ownership of the raw fds to the native side, which
-    // wraps them in File::from_raw_fd and closes them itself. Closing the same
-    // fd numbers again here double-closes them; on Android 13+ the numbers get
-    // recycled and the second close can crash the process mid-batch, which is
-    // why only the first file appeared to be encrypted.
-    val inputRawFd = inputFd.detachFd()
-    val outputRawFd = outputFd.detachFd()
-    val code = NeuronEncryptNative.nativeDecrypt(
-        inputRawFd,
-        outputRawFd,
-        password,
-        sourceSize,
-        listener,
-        cancelFlag
-    )
-    zeroByteArray(password)
-    return code
+    try {
+        // Pass the raw fds WITHOUT detaching — see encrypt() for the rationale.
+        return NeuronEncryptNative.nativeDecrypt(
+            inputFd.fd,
+            outputFd.fd,
+            password,
+            sourceSize,
+            listener,
+            cancelFlag
+        )
+    } finally {
+        inputFd.close()
+        outputFd.close()
+        zeroByteArray(password)
+    }
 }
 
 private fun zeroByteArray(bytes: ByteArray) {
