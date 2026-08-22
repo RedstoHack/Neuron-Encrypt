@@ -59,6 +59,15 @@ pub enum CryptoError {
 
     #[error("Operation cancelled by user")]
     Cancelled,
+
+    #[error("Metadata scrubbing is not supported for this format: {0}")]
+    UnsupportedMediaFormat(&'static str),
+
+    #[error("File appears to be corrupted or malformed: {0}")]
+    MalformedFile(String),
+
+    #[error("Metadata scrubbing failed: {0}")]
+    ScrubFailed(String),
 }
 
 /// Result type alias for crypto operations.

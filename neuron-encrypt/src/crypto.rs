@@ -298,7 +298,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
     a == b
 }
 
-fn validate_destination_path(src: &Path, dest: &Path, overwrite: bool) -> CryptoResult<PathBuf> {
+pub(crate) fn validate_destination_path(src: &Path, dest: &Path, overwrite: bool) -> CryptoResult<PathBuf> {
     let canonical_src = fs::canonicalize(src)?;
     let canonical_dest = normalize_destination_path(dest)?;
 
@@ -316,6 +316,15 @@ fn validate_destination_path(src: &Path, dest: &Path, overwrite: bool) -> Crypto
     Ok(canonical_dest)
 }
 
+/// Destination-path validation shared with the metadata module.
+pub fn validate_destination_path_public(
+    src: &Path,
+    dest: &Path,
+    overwrite: bool,
+) -> CryptoResult<PathBuf> {
+    validate_destination_path(src, dest, overwrite)
+}
+
 fn read_limited_file(file: fs::File, limit: u64) -> std::io::Result<Vec<u8>> {
     let mut reader = file.take(limit + 1);
     let mut buffer = Vec::new();
@@ -323,7 +332,7 @@ fn read_limited_file(file: fs::File, limit: u64) -> std::io::Result<Vec<u8>> {
     Ok(buffer)
 }
 
-fn persist_temp_file(tmp: &Path, dest: &Path) -> CryptoResult<()> {
+pub(crate) fn persist_temp_file(tmp: &Path, dest: &Path) -> CryptoResult<()> {
     #[cfg(unix)]
     {
         match fs::hard_link(tmp, dest) {
@@ -358,7 +367,7 @@ fn persist_temp_file(tmp: &Path, dest: &Path) -> CryptoResult<()> {
     }
 }
 
-fn tmp_path(dest: &Path) -> PathBuf {
+pub(crate) fn tmp_path(dest: &Path) -> PathBuf {
     let mut rng_bytes = [0u8; 8];
     OsRng.fill_bytes(&mut rng_bytes);
     let suffix = hex::encode(rng_bytes);
