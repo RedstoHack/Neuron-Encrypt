@@ -305,9 +305,9 @@ pub fn scrub_file(
     }
 
     let header = read_header(src)?;
-    let format = detect_media_format(&header).ok_or_else(|| {
-        CryptoError::UnsupportedMediaFormat("no dedicated metadata scrubber for this file type")
-    })?;
+    let format = detect_media_format(&header).ok_or(CryptoError::UnsupportedMediaFormat(
+        "no dedicated metadata scrubber for this file type",
+    ))?;
 
     let source_len = fs::metadata(src)?.len();
 

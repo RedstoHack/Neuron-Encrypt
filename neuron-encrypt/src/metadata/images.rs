@@ -104,10 +104,8 @@ fn scrub_jpeg(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
                             drop_reason = Some("APP1 metadata");
                         }
                     }
-                    0xE2 => {
-                        if payload.starts_with(b"ICC_PROFILE\0") {
-                            drop_reason = Some("ICC profile (APP2)");
-                        }
+                    0xE2 if payload.starts_with(b"ICC_PROFILE\0") => {
+                        drop_reason = Some("ICC profile (APP2)");
                     }
                     _ => {}
                 }

@@ -142,7 +142,7 @@ fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             }),
             _ => None,
         };
-        let bytes = patched.unwrap_or_else(|| bytes);
+        let bytes = patched.unwrap_or(bytes);
 
         if file.is_dir() {
             writer
