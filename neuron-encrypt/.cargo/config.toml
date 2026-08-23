@@ -1,17 +1,11 @@
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
-
 [target.x86_64-pc-windows-gnu]
-rustflags = ["-C", "target-feature=+crt-static"]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-gcc-ar"
+runner = "wine64"
 
-[target.aarch64-linux-android]
-rustflags = ["--remap-path-prefix", "${HOME}=~"]
+[build]
+target = "x86_64-pc-windows-gnu"
 
-[target.armv7-linux-androideabi]
-rustflags = ["--remap-path-prefix", "${HOME}=~"]
-
-[target.x86_64-linux-android]
-rustflags = ["--remap-path-prefix", "${HOME}=~"]
-
-[target.i686-linux-android]
-rustflags = ["--remap-path-prefix", "${HOME}=~"]
+[env]
+CC = "x86_64-w64-mingw32-gcc"
+AR = "x86_64-w64-mingw32-gcc-ar"
