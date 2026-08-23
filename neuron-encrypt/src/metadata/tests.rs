@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use super::documents;
 use super::images;
-use super::{default_scrub_output_name, detect_media_format, scrub_file, MediaFormat, ScrubOutput};
+use super::{detect_media_format, scrub_file, MediaFormat, ScrubOutput};
 use crate::crypto::ProgressReporter;
 use crate::error::CryptoError;
 
@@ -227,7 +227,7 @@ fn tiff_fixture() -> Vec<u8> {
 
     out.extend_from_slice(&(n_entries as u16).to_le_bytes());
     {
-        let mut entry = |out: &mut Vec<u8>, tag: u16, typ: u16, count: u32, value: [u8; 4]| {
+        let entry = |out: &mut Vec<u8>, tag: u16, typ: u16, count: u32, value: [u8; 4]| {
             out.extend_from_slice(&tag.to_le_bytes());
             out.extend_from_slice(&typ.to_le_bytes());
             out.extend_from_slice(&count.to_le_bytes());
@@ -393,11 +393,11 @@ fn docx_fixture() -> Vec<u8> {
     let buf = std::io::Cursor::new(Vec::new());
     let mut zw = ZipWriter::new(buf);
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    zw.start_file("[Content_Types].xml", opts.clone()).unwrap();
+    zw.start_file("[Content_Types].xml", opts).unwrap();
     zw.write_all(content_types.as_bytes()).unwrap();
-    zw.start_file("_rels/.rels", opts.clone()).unwrap();
+    zw.start_file("_rels/.rels", opts).unwrap();
     zw.write_all(rels.as_bytes()).unwrap();
-    zw.start_file("docProps/core.xml", opts.clone()).unwrap();
+    zw.start_file("docProps/core.xml", opts).unwrap();
     zw.write_all(b"<cp:coreProperties><dc:creator>Sneaky Author</dc:creator></cp:coreProperties>")
         .unwrap();
     zw.start_file("word/document.xml", opts).unwrap();
