@@ -143,7 +143,10 @@ fn png_fixture(with_metadata: bool) -> Vec<u8> {
     out.extend(png_chunk(b"IHDR", &ihdr));
     if with_metadata {
         out.extend(png_chunk(b"tEXt", b"Comment\x00hide me"));
-        out.extend(png_chunk(b"iTXt", b"XML:com.adobe.xmp\x00\x00\x00\x00\x00<x/>"));
+        out.extend(png_chunk(
+            b"iTXt",
+            b"XML:com.adobe.xmp\x00\x00\x00\x00\x00<x/>",
+        ));
         out.extend(png_chunk(b"eXIf", &tiny_exif_tiff()));
         out.extend(png_chunk(b"tIME", &[126, 1, 1, 0, 0, 0]));
         out.extend(png_chunk(b"zTXt", b"key\x00\x00compressed"));
@@ -242,7 +245,13 @@ fn tiff_fixture() -> Vec<u8> {
         entry(&mut out, 258, 3, 3, (bits_off as u32).to_le_bytes()); // BitsPerSample
         entry(&mut out, 259, 3, 1, short_val(1)); // Compression = none
         entry(&mut out, 262, 3, 1, short_val(2)); // Photometric = RGB
-        entry(&mut out, 271, 2, EVIL_CAMERA.len() as u32, (make_off as u32).to_le_bytes());
+        entry(
+            &mut out,
+            271,
+            2,
+            EVIL_CAMERA.len() as u32,
+            (make_off as u32).to_le_bytes(),
+        );
         entry(&mut out, 273, 4, 1, (strip_off as u32).to_le_bytes()); // StripOffsets
         entry(&mut out, 277, 3, 1, short_val(3)); // SamplesPerPixel
         entry(&mut out, 278, 3, 1, short_val(H)); // RowsPerStrip
@@ -413,7 +422,10 @@ fn detects_all_supported_formats_by_magic() {
         (flac_fixture(), MediaFormat::Flac),
         (mp3_fixture(), MediaFormat::Mp3),
         (b"%PDF-1.7 trailing".to_vec(), MediaFormat::Pdf),
-        (b"\xFF\xFB\x90\x64raw-frame-no-id3".to_vec(), MediaFormat::Mp3),
+        (
+            b"\xFF\xFB\x90\x64raw-frame-no-id3".to_vec(),
+            MediaFormat::Mp3,
+        ),
     ];
     for (data, expected) in cases {
         assert_eq!(
@@ -438,9 +450,16 @@ fn detects_mp4_and_heif_brands() {
 
 #[test]
 fn rejects_unknown_and_lookalike_formats() {
-    assert_eq!(detect_media_format(b"II+\0\x08\x00\x00\x00\x00\x00\x00\x00"), None); // BigTIFF
-    assert_eq!(detect_media_format(b"PK\x03\x04no-content-types-here...."), None);
-    let ooxml_head: Vec<u8> = b"PK\x03\x04some-local-header-data-before-[Content_Types].xml".to_vec();
+    assert_eq!(
+        detect_media_format(b"II+\0\x08\x00\x00\x00\x00\x00\x00\x00"),
+        None
+    ); // BigTIFF
+    assert_eq!(
+        detect_media_format(b"PK\x03\x04no-content-types-here...."),
+        None
+    );
+    let ooxml_head: Vec<u8> =
+        b"PK\x03\x04some-local-header-data-before-[Content_Types].xml".to_vec();
     assert_eq!(detect_media_format(&ooxml_head), Some(MediaFormat::Ooxml));
     assert_eq!(detect_media_format(b"garbage garbage!"), None);
     assert_eq!(detect_media_format(b"VAULTX04\x00\x00\x00"), None);
@@ -550,12 +569,17 @@ fn tiff_rebuild_preserves_pixels_and_drops_metadata() {
     assert!(find(&out, b"2026:01:01").is_none(), "DateTime survived");
 
     assert!(removed.iter().any(|r| r.contains("Camera")), "{removed:?}");
-    assert!(removed.iter().any(|r| r.contains("Authorship")), "{removed:?}");
+    assert!(
+        removed.iter().any(|r| r.contains("Authorship")),
+        "{removed:?}"
+    );
     assert!(removed.iter().any(|r| r.contains("EXIF")), "{removed:?}");
 
     let entries = parse_tiff_entries(&out);
     let tags: HashSet<u16> = entries.iter().map(|e| e.0).collect();
-    for expected in [254u16, 256, 257, 258, 259, 262, 273, 277, 278, 279, 282, 283, 296] {
+    for expected in [
+        254u16, 256, 257, 258, 259, 262, 273, 277, 278, 279, 282, 283, 296,
+    ] {
         assert!(tags.contains(&expected), "lost essential tag {expected}");
     }
     assert!(!tags.contains(&271) && !tags.contains(&306) && !tags.contains(&34665));
@@ -566,7 +590,11 @@ fn tiff_rebuild_preserves_pixels_and_drops_metadata() {
     let strip = entries.iter().find(|e| e.0 == 273).unwrap();
     let new_off = u32::from_le_bytes([strip.3[0], strip.3[1], strip.3[2], strip.3[3]]) as usize;
     let original_pixels = &src[src.len() - 48..];
-    assert_eq!(&out[new_off..new_off + 48], original_pixels, "pixels corrupted");
+    assert_eq!(
+        &out[new_off..new_off + 48],
+        original_pixels,
+        "pixels corrupted"
+    );
 
     assert!(out.len() <= src.len());
     assert_eq!(detect_media_format(&out), Some(MediaFormat::Tiff));
@@ -679,7 +707,10 @@ fn docx_props_removed_and_package_stays_consistent() {
     assert!(ct.contains("/word/document.xml"));
 
     let mut rels = String::new();
-    ar.by_name("_rels/.rels").unwrap().read_to_string(&mut rels).unwrap();
+    ar.by_name("_rels/.rels")
+        .unwrap()
+        .read_to_string(&mut rels)
+        .unwrap();
     assert!(!rels.contains("docProps"), ".rels reference survived");
     assert!(rels.contains("word/document.xml"));
 
@@ -726,7 +757,10 @@ fn wav_riff_info_removed_pcm_kept() {
     let removed = super::media::scrub_media_file(&src_path, &dest).unwrap();
 
     let out = std::fs::read(&dest).unwrap();
-    assert!(removed.iter().any(|r| r.contains("RIFF INFO")), "{removed:?}");
+    assert!(
+        removed.iter().any(|r| r.contains("RIFF INFO")),
+        "{removed:?}"
+    );
     assert!(find(&out, b"INAM").is_none(), "INAM survived");
     assert!(find(&out, b"SECRET").is_none());
     assert!(find(&out, b"data").is_some(), "data chunk lost");
@@ -763,8 +797,15 @@ fn cleaned_copy_default_naming_and_original_untouched() {
     let src = write_file(&dir, "photo.jpg", &jpeg_fixture(true));
     let original = std::fs::read(&src).unwrap();
 
-    let report =
-        scrub_file(&src, None, ScrubOutput::CleanedCopy, false, &NullReporter, None).unwrap();
+    let report = scrub_file(
+        &src,
+        None,
+        ScrubOutput::CleanedCopy,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap();
 
     assert_eq!(report.format, MediaFormat::Jpeg);
     assert!(!report.removed.is_empty());
@@ -809,15 +850,26 @@ fn unsupported_formats_fail_loudly_without_output() {
         ("blob.bin", b"\x00\x01\x02random-garbage".to_vec()),
     ] {
         let src = write_file(&dir, name, &data);
-        let err =
-            scrub_file(&src, None, ScrubOutput::CleanedCopy, false, &NullReporter, None).unwrap_err();
+        let err = scrub_file(
+            &src,
+            None,
+            ScrubOutput::CleanedCopy,
+            false,
+            &NullReporter,
+            None,
+        )
+        .unwrap_err();
         assert!(
             matches!(err, CryptoError::UnsupportedMediaFormat(_)),
             "{name}: {err:?}"
         );
     }
 
-    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 3, "stray outputs left");
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        3,
+        "stray outputs left"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -867,7 +919,11 @@ fn cancel_flag_prevents_work_and_output() {
     )
     .unwrap_err();
     assert!(matches!(err, CryptoError::Cancelled));
-    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "output despite cancel");
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        1,
+        "output despite cancel"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -894,7 +950,15 @@ fn wipe_original_removes_source_in_copy_mode() {
     let dir = tmp_dir("wipe");
     let src = write_file(&dir, "gone.jpg", &jpeg_fixture(true));
 
-    scrub_file(&src, None, ScrubOutput::CleanedCopy, true, &NullReporter, None).unwrap();
+    scrub_file(
+        &src,
+        None,
+        ScrubOutput::CleanedCopy,
+        true,
+        &NullReporter,
+        None,
+    )
+    .unwrap();
     assert!(!src.exists(), "original survived wipe_original");
     assert!(dir.join("gone.clean.jpg").exists());
 
@@ -923,7 +987,11 @@ fn idempotence_across_formats() {
             "{name}: second pass removed {:?}",
             report.removed
         );
-        assert_eq!(once, std::fs::read(&src).unwrap(), "{name}: mutated on second pass");
+        assert_eq!(
+            once,
+            std::fs::read(&src).unwrap(),
+            "{name}: mutated on second pass"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

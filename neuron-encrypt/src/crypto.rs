@@ -298,7 +298,11 @@ fn same_path(a: &Path, b: &Path) -> bool {
     a == b
 }
 
-pub(crate) fn validate_destination_path(src: &Path, dest: &Path, overwrite: bool) -> CryptoResult<PathBuf> {
+pub(crate) fn validate_destination_path(
+    src: &Path,
+    dest: &Path,
+    overwrite: bool,
+) -> CryptoResult<PathBuf> {
     let canonical_src = fs::canonicalize(src)?;
     let canonical_dest = normalize_destination_path(dest)?;
 

@@ -1,0 +1,7 @@
+New: metadata scrubbing! Remove EXIF/GPS, XMP, ID3 tags and document properties from photos, PDFs, office docs and audio files - on-device, no internet.
+
+- Dedicated scrubbers for JPEG, PNG, WebP, GIF, TIFF, BMP, PDF, Office (docx/xlsx/pptx), MP3, FLAC, OGG, WAV and MP4/MOV
+- Single-file mode gets a new "Scrub" tab; batch mode can scrub whole folders
+- Cleaned copies are written as <name>.clean.<ext> - your originals are never touched
+- Unsupported formats are rejected loudly instead of being copied silently
+- Fixed: cancelling mid-chunk could hang the native worker

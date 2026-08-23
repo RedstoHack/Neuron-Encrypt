@@ -43,20 +43,24 @@ fn scrub_jpeg(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
 
     loop {
         // Find next marker (fill bytes 0xFF may repeat).
-        while pos < data.len() && data[pos] != 0xFF {
+        if pos < data.len() && data[pos] != 0xFF {
             return Err(CryptoError::MalformedFile(format!(
                 "stray byte 0x{:02X} at {pos} before marker",
                 data[pos]
             )));
         }
         if pos >= data.len() {
-            return Err(CryptoError::MalformedFile("JPEG ended without SOS/trailer".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "JPEG ended without SOS/trailer".to_string(),
+            ));
         }
         while pos < data.len() && data[pos] == 0xFF {
             pos += 1;
         }
         if pos >= data.len() {
-            return Err(CryptoError::MalformedFile("truncated JPEG marker".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "truncated JPEG marker".to_string(),
+            ));
         }
         let marker_start = pos - 1; // include the leading 0xFF when copying
         let marker = data[pos];
@@ -84,7 +88,7 @@ fn scrub_jpeg(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             }
             _ => {
                 let seg_end = marker_len(data, pos)?;
-                let payload = &data[pos..seg_end.min(data.len())];
+                let payload = &data[pos + 2..seg_end.min(data.len())];
 
                 let mut drop_reason: Option<&'static str> = None;
                 match marker {
@@ -122,15 +126,21 @@ fn scrub_jpeg(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
 
 fn marker_len(data: &[u8], payload_start: usize) -> CryptoResult<usize> {
     if payload_start + 2 > data.len() {
-        return Err(CryptoError::MalformedFile("truncated JPEG segment header".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "truncated JPEG segment header".to_string(),
+        ));
     }
     let len = u16::from_be_bytes([data[payload_start], data[payload_start + 1]]) as usize;
     if len < 2 {
-        return Err(CryptoError::MalformedFile("degenerate JPEG segment length".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "degenerate JPEG segment length".to_string(),
+        ));
     }
     let end = payload_start + len;
     if end > data.len() {
-        return Err(CryptoError::MalformedFile("JPEG segment overruns file".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "JPEG segment overruns file".to_string(),
+        ));
     }
     Ok(end)
 }
@@ -155,16 +165,14 @@ fn scrub_png(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     let mut pos = 8usize;
 
     while pos + 12 <= data.len() {
-        let len = u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-        let kind = [
-            data[pos + 4],
-            data[pos + 5],
-            data[pos + 6],
-            data[pos + 7],
-        ];
+        let len =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        let kind = [data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]];
         let end = pos + 12 + len;
         if end > data.len() {
-            return Err(CryptoError::MalformedFile("PNG chunk overruns file".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "PNG chunk overruns file".to_string(),
+            ));
         }
 
         if META_CHUNKS.iter().any(|t| **t == kind) {
@@ -184,7 +192,9 @@ fn scrub_png(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     }
 
     if pos != data.len() {
-        return Err(CryptoError::MalformedFile("trailing bytes after PNG IEND".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "trailing bytes after PNG IEND".to_string(),
+        ));
     }
 
     Ok((out, dedup(removed)))
@@ -196,7 +206,9 @@ fn scrub_png(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
 
 fn scrub_webp(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     if data.len() < 15 || &data[0..4] != b"RIFF" || &data[8..12] != b"WEBP" {
-        return Err(CryptoError::MalformedFile("bad WebP RIFF header".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "bad WebP RIFF header".to_string(),
+        ));
     }
 
     let mut body = Vec::with_capacity(data.len());
@@ -205,10 +217,13 @@ fn scrub_webp(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
 
     while pos + 8 <= data.len() {
         let kind = &data[pos..pos + 4];
-        let len = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]]) as usize;
+        let len = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]])
+            as usize;
         let end = pos + 8 + len;
         if end > data.len() {
-            return Err(CryptoError::MalformedFile("WebP chunk overruns file".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "WebP chunk overruns file".to_string(),
+            ));
         }
 
         if kind == b"EXIF" || kind == b"XMP " {
@@ -228,7 +243,9 @@ fn scrub_webp(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     }
 
     if pos != data.len() {
-        return Err(CryptoError::MalformedFile("trailing bytes after WebP chunks".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "trailing bytes after WebP chunks".to_string(),
+        ));
     }
 
     let mut out = Vec::with_capacity(body.len() + 8);
@@ -258,7 +275,9 @@ fn gif_skip_sub_blocks(data: &[u8], pos: &mut usize) -> CryptoResult<()> {
             return Ok(());
         }
         if *pos > data.len() {
-            return Err(CryptoError::MalformedFile("GIF sub-block overruns file".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "GIF sub-block overruns file".to_string(),
+            ));
         }
     }
 }
@@ -276,7 +295,9 @@ fn scrub_gif(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     };
     let mut pos = 13 + gct_size;
     if pos > data.len() {
-        return Err(CryptoError::MalformedFile("GIF global color table overruns file".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "GIF global color table overruns file".to_string(),
+        ));
     }
 
     let mut out = Vec::with_capacity(data.len());
@@ -356,19 +377,19 @@ const TYPE_SIZES: [u64; 13] = [0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8];
 const TIFF_KEEP_TAGS: [u16; 27] = [
     254, 255, // NewSubfileType, SubfileType
     256, 257, // ImageWidth, ImageLength
-    258,     // BitsPerSample
-    259,     // Compression
-    262,     // PhotometricInterpretation
-    266,     // FillOrder
-    273,     // StripOffsets
+    258, // BitsPerSample
+    259, // Compression
+    262, // PhotometricInterpretation
+    266, // FillOrder
+    273, // StripOffsets
     277, 278, 279, // SamplesPerPixel, RowsPerStrip, StripByteCounts
     282, 283, 296, // X/YResolution, ResolutionUnit
-    284,     // PlanarConfiguration
-    317,     // Predictor
-    320,     // ColorMap
+    284, // PlanarConfiguration
+    317, // Predictor
+    320, // ColorMap
     322, 323, 324, 325, // TileWidth/Length/Offsets/ByteCounts
     338, 339, // ExtraSamples, SampleFormat
-    347,     // JPEGTables
+    347, // JPEGTables
     530, 531, // YCbCrSubSampling, YCbCrPositioning
 ];
 
@@ -394,7 +415,9 @@ struct TiffCtx {
 impl TiffCtx {
     fn u16_at(&self, d: &[u8], o: usize) -> CryptoResult<u16> {
         if o + 2 > d.len() {
-            return Err(CryptoError::MalformedFile("TIFF read out of range".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "TIFF read out of range".to_string(),
+            ));
         }
         Ok(if self.le {
             u16::from_le_bytes([d[o], d[o + 1]])
@@ -404,7 +427,9 @@ impl TiffCtx {
     }
     fn u32_at(&self, d: &[u8], o: usize) -> CryptoResult<u32> {
         if o + 4 > d.len() {
-            return Err(CryptoError::MalformedFile("TIFF read out of range".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "TIFF read out of range".to_string(),
+            ));
         }
         Ok(if self.le {
             u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
@@ -443,7 +468,11 @@ impl TiffCtx {
     }
 }
 
-fn tiff_value_span(ctx: &TiffCtx, data: &[u8], e: &TiffEntry) -> CryptoResult<Option<(usize, usize)>> {
+fn tiff_value_span(
+    ctx: &TiffCtx,
+    data: &[u8],
+    e: &TiffEntry,
+) -> CryptoResult<Option<(usize, usize)>> {
     let unit = TYPE_SIZES.get(e.typ as usize).copied().unwrap_or(1).max(1);
     let total = unit.saturating_mul(e.count as u64);
     if total <= 4 {
@@ -456,11 +485,13 @@ fn tiff_value_span(ctx: &TiffCtx, data: &[u8], e: &TiffEntry) -> CryptoResult<Op
         )));
     }
     let off = ctx.entry_offset(e) as usize;
-    let end = off.checked_add(total as usize).ok_or_else(|| {
-        CryptoError::MalformedFile("TIFF value span overflow".to_string())
-    })?;
+    let end = off
+        .checked_add(total as usize)
+        .ok_or_else(|| CryptoError::MalformedFile("TIFF value span overflow".to_string()))?;
     if end > data.len() {
-        return Err(CryptoError::MalformedFile("TIFF external value out of range".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "TIFF external value out of range".to_string(),
+        ));
     }
     Ok(Some((off, end)))
 }
@@ -474,7 +505,7 @@ struct RelocRange {
 
 impl RelocRange {
     fn translate(&self, abs_old: usize) -> Option<usize> {
-        if abs_old >= self.old && abs_old + 1 <= self.old + self.len {
+        if abs_old >= self.old && abs_old < self.old + self.len {
             Some(self.new + (abs_old - self.old))
         } else {
             None
@@ -499,19 +530,27 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     let mut seen = std::collections::HashSet::new();
     while cursor != 0 {
         if !seen.insert(cursor) || chain.len() >= 64 {
-            return Err(CryptoError::MalformedFile("TIFF IFD chain loops or is too deep".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "TIFF IFD chain loops or is too deep".to_string(),
+            ));
         }
         let start = cursor as usize;
         if start + 2 > data.len() {
-            return Err(CryptoError::MalformedFile("TIFF IFD offset out of range".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "TIFF IFD offset out of range".to_string(),
+            ));
         }
         let count = ctx.u16_at(data, start)? as usize;
         if count == 0 || count > 4096 {
-            return Err(CryptoError::MalformedFile("implausible TIFF IFD entry count".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "implausible TIFF IFD entry count".to_string(),
+            ));
         }
         let table_end = start + 2 + count * 12 + 4;
         if table_end > data.len() {
-            return Err(CryptoError::MalformedFile("TIFF IFD table exceeds bounds".to_string()));
+            return Err(CryptoError::MalformedFile(
+                "TIFF IFD table exceeds bounds".to_string(),
+            ));
         }
         let mut entries = Vec::with_capacity(count);
         for i in 0..count {
@@ -532,7 +571,9 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         chain.push(entries);
     }
     if chain.is_empty() {
-        return Err(CryptoError::MalformedFile("TIFF contains no IFD".to_string()));
+        return Err(CryptoError::MalformedFile(
+            "TIFF contains no IFD".to_string(),
+        ));
     }
 
     // ---- Filter entries -------------------------------------------------
@@ -580,12 +621,17 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
                         "mismatched TIFF offsets/counts entries".to_string(),
                     ));
                 }
-                blocks_spec.push(OffsetsCounts { offsets: o, counts: c, typ_u32: o.typ == 4 });
+                blocks_spec.push(OffsetsCounts {
+                    offsets: o,
+                    counts: c,
+                    typ_u32: o.typ == 4,
+                });
             }
         }
     }
 
-    let unit_of = |e: &TiffEntry| TYPE_SIZES.get(e.typ as usize).copied().unwrap_or(1).max(1) as usize;
+    let unit_of =
+        |e: &TiffEntry| TYPE_SIZES.get(e.typ as usize).copied().unwrap_or(1).max(1) as usize;
     let mut data_ranges: Vec<(usize, usize)> = Vec::new(); // absolute (old_off, len)
     for spec in &blocks_spec {
         let n = spec.offsets.count as usize;
@@ -600,8 +646,16 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             }
         };
 
-        let offs_arr = if u * n <= 4 { None } else { Some(ctx.entry_offset(spec.offsets) as usize) };
-        let cnts_arr = if u * n <= 4 { None } else { Some(ctx.entry_offset(spec.counts) as usize) };
+        let offs_arr = if u * n <= 4 {
+            None
+        } else {
+            Some(ctx.entry_offset(spec.offsets) as usize)
+        };
+        let cnts_arr = if u * n <= 4 {
+            None
+        } else {
+            Some(ctx.entry_offset(spec.counts) as usize)
+        };
 
         let inline_val = |e: &TiffEntry| -> CryptoResult<u64> {
             if spec.typ_u32 {
@@ -632,7 +686,9 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
                 CryptoError::MalformedFile("TIFF strip range overflow".to_string())
             })?;
             if end > data.len() as u64 {
-                return Err(CryptoError::MalformedFile("TIFF strip data out of range".to_string()));
+                return Err(CryptoError::MalformedFile(
+                    "TIFF strip data out of range".to_string(),
+                ));
             }
             data_ranges.push((off as usize, len as usize));
         }
@@ -655,7 +711,9 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         merged
     };
     let externals_merged = merge(&externals);
-    let data_merged = merge(&data_ranges);
+    // data_ranges holds (offset, length); merge expects (start, end) spans.
+    let data_spans: Vec<(usize, usize)> = data_ranges.iter().map(|(o, l)| (*o, o + l)).collect();
+    let data_merged = merge(&data_spans);
 
     // ---- Assign new layout ------------------------------------------------
     let header_len = 8usize;
@@ -668,19 +726,37 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
 
     let mut reloc_ext: Vec<RelocRange> = Vec::with_capacity(externals_merged.len());
     for (s, e) in &externals_merged {
-        reloc_ext.push(RelocRange { old: *s, len: e - s, new: cursor_new });
+        reloc_ext.push(RelocRange {
+            old: *s,
+            len: e - s,
+            new: cursor_new,
+        });
         cursor_new += e - s;
     }
     let mut reloc_data: Vec<RelocRange> = Vec::with_capacity(data_merged.len());
     for (s, e) in &data_merged {
-        reloc_data.push(RelocRange { old: *s, len: e - s, new: cursor_new });
+        reloc_data.push(RelocRange {
+            old: *s,
+            len: e - s,
+            new: cursor_new,
+        });
         cursor_new += e - s;
     }
 
-    let translate_ext =
-        |abs: usize| -> CryptoResult<usize> { reloc_ext.iter().find_map(|r| r.translate(abs)).ok_or_else(|| CryptoError::MalformedFile("unmapped TIFF external value".to_string())) };
-    let translate_data =
-        |abs: usize| -> CryptoResult<usize> { reloc_data.iter().find_map(|r| r.translate(abs)).ok_or_else(|| CryptoError::MalformedFile("unmapped TIFF strip/tile offset".to_string())) };
+    let translate_ext = |abs: usize| -> CryptoResult<usize> {
+        reloc_ext
+            .iter()
+            .find_map(|r| r.translate(abs))
+            .ok_or_else(|| CryptoError::MalformedFile("unmapped TIFF external value".to_string()))
+    };
+    let translate_data = |abs: usize| -> CryptoResult<usize> {
+        reloc_data
+            .iter()
+            .find_map(|r| r.translate(abs))
+            .ok_or_else(|| {
+                CryptoError::MalformedFile("unmapped TIFF strip/tile offset".to_string())
+            })
+    };
 
     // ---- Serialize ----------------------------------------------------------
     let mut out = vec![0u8; cursor_new];
@@ -756,7 +832,11 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     for spec in &blocks_spec {
         let n = spec.offsets.count as usize;
         let u = unit_of(spec.offsets);
-        let offs_arr_old = if u * n <= 4 { None } else { Some(ctx.entry_offset(spec.offsets) as usize) };
+        let offs_arr_old = if u * n <= 4 {
+            None
+        } else {
+            Some(ctx.entry_offset(spec.offsets) as usize)
+        };
         if let Some(old_arr) = offs_arr_old {
             let new_arr = translate_ext(old_arr)?;
             for i in 0..n {
@@ -798,5 +878,8 @@ use removed_labels as RemovedCategory;
 
 fn dedup(items: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
-    items.into_iter().filter(|i| seen.insert(i.clone())).collect()
+    items
+        .into_iter()
+        .filter(|i| seen.insert(i.clone()))
+        .collect()
 }

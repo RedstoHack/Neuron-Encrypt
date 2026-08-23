@@ -61,7 +61,11 @@ fn scrub_pdf(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     }
 
     // 2. Catalog /Metadata stream — XMP packet.
-    let catalog_id = doc.trailer.get(b"Root").ok().and_then(|o| o.as_reference().ok());
+    let catalog_id = doc
+        .trailer
+        .get(b"Root")
+        .ok()
+        .and_then(|o| o.as_reference().ok());
     if let Some(catalog_id) = catalog_id {
         let metadata_ref = doc
             .get_object(catalog_id)
@@ -106,17 +110,17 @@ fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
     let reader = std::io::Cursor::new(data);
-    let mut archive =
-        ZipArchive::new(reader).map_err(|e| CryptoError::MalformedFile(format!("OOXML parse failed: {e}")))?;
+    let mut archive = ZipArchive::new(reader)
+        .map_err(|e| CryptoError::MalformedFile(format!("OOXML parse failed: {e}")))?;
 
     let buf = std::io::Cursor::new(Vec::with_capacity(data.len() + 4096));
     let mut writer = ZipWriter::new(buf);
     let mut removed: Vec<String> = Vec::new();
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| {
-            CryptoError::MalformedFile(format!("OOXML entry {i} unreadable: {e}"))
-        })?;
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| CryptoError::MalformedFile(format!("OOXML entry {i} unreadable: {e}")))?;
         let name = file.name().to_string();
 
         if is_dropped_part(&name) {
@@ -127,20 +131,15 @@ fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         // Read the full entry, then patch the two index parts that reference
         // docProps so the package stays valid after their removal.
         let mut bytes = Vec::with_capacity(file.size() as usize);
-        file.read_to_end(&mut bytes)
-            .map_err(CryptoError::from)?;
+        file.read_to_end(&mut bytes).map_err(CryptoError::from)?;
 
         let patched = match name.as_str() {
-            "[Content_Types].xml" => remove_xml_elements(
-                &bytes,
-                b"<Override",
-                &|elem| find_attr(elem, b"PartName").starts_with(b"/docProps"),
-            ),
-            "_rels/.rels" => remove_xml_elements(
-                &bytes,
-                b"<Relationship",
-                &|elem| find_attr(elem, b"Target").starts_with(b"docProps"),
-            ),
+            "[Content_Types].xml" => remove_xml_elements(&bytes, b"<Override", &|elem| {
+                find_attr(elem, b"PartName").starts_with(b"/docProps")
+            }),
+            "_rels/.rels" => remove_xml_elements(&bytes, b"<Relationship", &|elem| {
+                find_attr(elem, b"Target").starts_with(b"docProps")
+            }),
             _ => None,
         };
         let bytes = patched.unwrap_or_else(|| bytes);
@@ -153,7 +152,8 @@ fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         }
 
         let method = file.compression();
-        let method = if method == CompressionMethod::Stored || method == CompressionMethod::Deflated {
+        let method = if method == CompressionMethod::Stored || method == CompressionMethod::Deflated
+        {
             method
         } else {
             CompressionMethod::Deflated
@@ -253,7 +253,9 @@ fn find_attr(element: &[u8], attr: &[u8]) -> Vec<u8> {
     match find_subslice(element, &needle) {
         Some(start) => {
             let vstart = start + needle.len();
-            let vend = find_subslice(&element[vstart..], b"\"").map(|r| vstart + r).unwrap_or(vstart);
+            let vend = find_subslice(&element[vstart..], b"\"")
+                .map(|r| vstart + r)
+                .unwrap_or(vstart);
             element[vstart..vend].to_vec()
         }
         None => Vec::new(),
@@ -261,12 +263,13 @@ fn find_attr(element: &[u8], attr: &[u8]) -> Vec<u8> {
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 fn dedup(items: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
-    items.into_iter().filter(|i| seen.insert(i.clone())).collect()
+    items
+        .into_iter()
+        .filter(|i| seen.insert(i.clone()))
+        .collect()
 }

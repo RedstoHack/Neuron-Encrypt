@@ -14,6 +14,7 @@ use eframe::egui::{
 };
 use neuron_encrypt_core::crypto::{self, ProgressReporter, ThrottledReporter};
 use neuron_encrypt_core::error::CryptoError;
+use neuron_encrypt_core::metadata;
 use neuron_encrypt_core::utils::{constant_time_eq, format_size, is_vx2_file};
 // P2-UI: rand_core import removed — was only used for scramble_text generation,
 // which is deleted. The crypto module has its own OsRng import.
@@ -88,6 +89,7 @@ enum AppFlow {
 enum Mode {
     Encrypt,
     Decrypt,
+    Scrub,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -156,6 +158,8 @@ pub struct NeuronEncryptApp {
     last_spinner_tick: Instant,
     // P2-UI: scramble_text field removed — ACTIVITY panel was deleted.
     reencrypt_confirmed: bool,
+    /// Batch mode toggle: scrub metadata instead of encrypt/decrypt.
+    batch_scrub: bool,
     strength_frac: f32,
     prog_frac: f32,
     check_anim: f32,
@@ -318,12 +322,40 @@ fn sequence_penalty(password: &str) -> f64 {
 fn common_password_penalty(password: &str) -> f64 {
     let lower = password.to_lowercase();
     let common = [
-        "password", "pass", "123456", "12345678", "qwerty", "abc123", "monkey",
-        "1234567", "letmein", "trustno1", "dragon", "baseball", "iloveyou",
-        "master", "sunshine", "ashley", "michael", "shadow", "123123", "654321",
-        "superman", "qazwsx", "football", "password1", "password123", "admin",
-        "welcome", "hello", "freedom", "whatever", "hunter2", "password!",
-        "p@ssw0rd", "p@ssword",
+        "password",
+        "pass",
+        "123456",
+        "12345678",
+        "qwerty",
+        "abc123",
+        "monkey",
+        "1234567",
+        "letmein",
+        "trustno1",
+        "dragon",
+        "baseball",
+        "iloveyou",
+        "master",
+        "sunshine",
+        "ashley",
+        "michael",
+        "shadow",
+        "123123",
+        "654321",
+        "superman",
+        "qazwsx",
+        "football",
+        "password1",
+        "password123",
+        "admin",
+        "welcome",
+        "hello",
+        "freedom",
+        "whatever",
+        "hunter2",
+        "password!",
+        "p@ssw0rd",
+        "p@ssword",
     ];
 
     for cp in &common {
@@ -338,6 +370,7 @@ fn preview_output_name(mode: Mode, path: &Path) -> String {
     match mode {
         Mode::Encrypt => crypto::default_encrypt_output_name(path),
         Mode::Decrypt => crypto::default_decrypt_output_name(path),
+        Mode::Scrub => metadata::default_scrub_output_name(path),
     }
 }
 
@@ -362,6 +395,7 @@ impl NeuronEncryptApp {
             spinner_index: 0,
             last_spinner_tick: Instant::now(),
             reencrypt_confirmed: false,
+            batch_scrub: false,
             strength_frac: 0.0,
             prog_frac: 0.0,
             check_anim: 0.0,
@@ -387,6 +421,7 @@ impl NeuronEncryptApp {
         self.progress = 0.0;
         self.prog_frac = 0.0;
         self.reencrypt_confirmed = false;
+        self.batch_scrub = false;
         self.strength_frac = 0.0;
         self.check_anim = 0.0;
         self.cancel_flag.store(false, Ordering::SeqCst);
@@ -430,6 +465,7 @@ impl NeuronEncryptApp {
             AppFlow::Configure => match self.mode {
                 Mode::Encrypt => ("ENCRYPT", Palette::accent_muted(), Palette::TEXT_ACCENT),
                 Mode::Decrypt => ("DECRYPT", Palette::accent_muted(), Palette::TEXT_ACCENT),
+                Mode::Scrub => ("SCRUB", Palette::accent_muted(), Palette::TEXT_ACCENT),
             },
             AppFlow::Processing => ("PROCESSING", Palette::accent_muted(), Palette::TEXT_ACCENT),
             AppFlow::Success => ("COMPLETE", Palette::success_muted(), Palette::SUCCESS),
@@ -450,11 +486,13 @@ impl NeuronEncryptApp {
             AppFlow::Configure => match self.mode {
                 Mode::Encrypt => "Review the file and encrypt it",
                 Mode::Decrypt => "Review the file and decrypt it",
+                Mode::Scrub => "Review the file and strip its metadata",
             },
             AppFlow::Processing => "Working on your file",
             AppFlow::Success => match self.mode {
                 Mode::Encrypt => "Encryption complete",
                 Mode::Decrypt => "Decryption complete",
+                Mode::Scrub => "Metadata removed",
             },
             AppFlow::Failure => "The operation did not finish",
             AppFlow::BatchConfigure => "Set up batch operation",
@@ -494,6 +532,11 @@ impl NeuronEncryptApp {
         let Some(file_path) = self.selected_file.clone() else {
             return;
         };
+
+        if self.mode == Mode::Scrub {
+            self.execute_scrub(ctx);
+            return;
+        }
 
         if self.password.chars().count() < crypto::MIN_PASSWORD_LEN {
             self.status = Some(format!(
@@ -601,11 +644,201 @@ impl NeuronEncryptApp {
         });
     }
 
+    /// Scrub metadata: no passphrase, cleaned copy beside the source.
+    fn execute_scrub(&mut self, ctx: &egui::Context) {
+        let Some(file_path) = self.selected_file.clone() else {
+            return;
+        };
+
+        let dest_name = preview_output_name(Mode::Scrub, &file_path);
+        let dest = match file_path.parent() {
+            Some(parent) => parent.join(&dest_name),
+            None => PathBuf::from(&dest_name),
+        };
+        // Refuse to clobber an existing output (matches encrypt semantics).
+        if dest.exists() {
+            self.status = Some(format!(
+                "Output already exists: {}. Rename it or pick a different source.",
+                dest.display()
+            ));
+            return;
+        }
+
+        self.dest_path = Some(dest.clone());
+        self.progress = 0.0;
+        self.prog_frac = 0.0;
+        self.status = Some("Preparing secure file operation...".to_owned());
+        self.cancel_flag.store(false, Ordering::SeqCst);
+
+        let (tx, rx) = mpsc::unbounded();
+        self.crypto_rx = Some(rx);
+        self.flow = AppFlow::Processing;
+
+        let ctx_clone = ctx.clone();
+        let cancel_for_thread = self.cancel_flag.clone();
+
+        std::thread::spawn(move || {
+            let reporter = MpscReporter { tx: tx.clone() };
+            let throttled_reporter = ThrottledReporter::new(&reporter);
+
+            let result = metadata::scrub_file(
+                &file_path,
+                Some(&dest),
+                metadata::ScrubOutput::CleanedCopy,
+                false,
+                &throttled_reporter,
+                Some(&cancel_for_thread),
+            );
+
+            match result {
+                Ok(report) => {
+                    let summary = if report.removed.is_empty() {
+                        format!(
+                            "No removable metadata found in the {} file. A verified copy was written.",
+                            report.format.name()
+                        )
+                    } else {
+                        format!(
+                            "Removed {} kind(s) of metadata from the {} file: {}",
+                            report.removed.len(),
+                            report.format.name(),
+                            report.removed.join("; ")
+                        )
+                    };
+                    let _ = tx.try_send(GuiMsg::Done(summary, None));
+                }
+                Err(CryptoError::Cancelled) => {
+                    let _ = tx.try_send(GuiMsg::Done(
+                        "Operation cancelled by user. No output file was written.".to_owned(),
+                        None,
+                    ));
+                }
+                Err(e) => {
+                    let _ = tx.try_send(GuiMsg::Error(e));
+                }
+            }
+
+            ctx_clone.request_repaint();
+        });
+    }
+
+    /// Batch metadata scrubbing — no passphrase required.
+    fn execute_batch_scrub(&mut self, ctx: &egui::Context) {
+        self.batch_results = self
+            .batch_files
+            .iter()
+            .map(|p| BatchResult {
+                src_name: p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| String::from("(unknown)")),
+                dest_path: None,
+                sha256: None,
+                error: None,
+            })
+            .collect();
+
+        self.batch_current_index = 0;
+        self.batch_current_file_progress = 0.0;
+        self.progress = 0.0;
+        self.prog_frac = 0.0;
+        self.cancel_flag.store(false, Ordering::SeqCst);
+
+        let (tx, rx) = mpsc::unbounded();
+        self.crypto_rx = Some(rx);
+        self.flow = AppFlow::BatchProcessing;
+
+        let files = self.batch_files.clone();
+        let ctx_clone = ctx.clone();
+        let cancel = self.cancel_flag.clone();
+
+        std::thread::spawn(move || {
+            let total = files.len();
+
+            for (idx, src) in files.iter().enumerate() {
+                if cancel.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let dest_name = metadata::default_scrub_output_name(src);
+                let dest = match src.parent() {
+                    Some(parent) => parent.join(&dest_name),
+                    None => std::path::PathBuf::from(&dest_name),
+                };
+
+                let tx_clone = tx.clone();
+                let idx_copy = idx;
+                let total_copy = total;
+                let file_reporter = move |frac: f32, msg: &str| {
+                    let _ = tx_clone.try_send(GuiMsg::BatchFileProgress(
+                        idx_copy,
+                        frac,
+                        msg.to_owned(),
+                    ));
+                    let _ = tx_clone.try_send(GuiMsg::Progress(
+                        (idx_copy as f32 + frac) / total_copy as f32,
+                        msg.to_owned(),
+                    ));
+                };
+
+                struct FnReporter<F: Fn(f32, &str) + Send + Sync>(F);
+                impl<F: Fn(f32, &str) + Send + Sync> ProgressReporter for FnReporter<F> {
+                    fn report(&self, p: f32, m: &str) {
+                        (self.0)(p, m);
+                    }
+                }
+                let reporter = FnReporter(file_reporter);
+                let throttled = ThrottledReporter::new(&reporter);
+
+                match metadata::scrub_file(
+                    src,
+                    Some(&dest),
+                    metadata::ScrubOutput::CleanedCopy,
+                    false,
+                    &throttled,
+                    Some(&cancel),
+                ) {
+                    Ok(report) => {
+                        let note = if report.removed.is_empty() {
+                            format!("{}: no removable metadata", report.format.name())
+                        } else {
+                            format!(
+                                "{}: removed {}",
+                                report.format.name(),
+                                report.removed.join("; ")
+                            )
+                        };
+                        let _ = tx.try_send(GuiMsg::BatchFileDone(idx, dest, Some(note)));
+                    }
+                    Err(CryptoError::Cancelled) => {
+                        let _ = tx.try_send(GuiMsg::BatchFileError(idx, "Cancelled".to_string()));
+                        break;
+                    }
+                    Err(e) => {
+                        let _ = tx.try_send(GuiMsg::BatchFileError(idx, e.to_string()));
+                    }
+                }
+
+                let _ = tx.try_send(GuiMsg::Progress(
+                    (idx + 1) as f32 / total as f32,
+                    "File complete.".to_owned(),
+                ));
+            }
+
+            let _ = tx.try_send(GuiMsg::BatchAllDone);
+            ctx_clone.request_repaint();
+        });
+    }
+
     /// Launch batch processing for all files in `self.batch_files`.
     /// Files are processed sequentially in a background thread.
     /// Each file's output is saved beside the source with the appropriate extension.
     fn execute_batch(&mut self, ctx: &egui::Context) {
         if self.batch_files.is_empty() {
+            return;
+        }
+        if self.batch_scrub {
+            self.execute_batch_scrub(ctx);
             return;
         }
         if self.password.chars().count() < crypto::MIN_PASSWORD_LEN {
@@ -1285,9 +1518,56 @@ impl NeuronEncryptApp {
         // user about what's happening without dumping crypto jargon (sii.pl
         // principle #2: educate in context).
         ui.add_space(14.0);
+        // Operation switcher — scrub is a first-class mode alongside
+        // encrypt/decrypt.
+        ui.horizontal(|ui| {
+            for (label, m) in [
+                ("ENCRYPT", Mode::Encrypt),
+                ("DECRYPT", Mode::Decrypt),
+                ("SCRUB METADATA", Mode::Scrub),
+            ] {
+                let selected = self.mode == m;
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(label)
+                                .font(FontId::new(10.5, FontFamily::Monospace))
+                                .color(if selected {
+                                    Palette::TEXT_HI
+                                } else {
+                                    Palette::TEXT_LO
+                                }),
+                        )
+                        .fill(if selected {
+                            Palette::SURFACE_2
+                        } else {
+                            Palette::SURFACE_1
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if selected {
+                                Palette::ACCENT
+                            } else {
+                                Palette::BORDER
+                            },
+                        ))
+                        .corner_radius(6.0),
+                    )
+                    .clicked()
+                {
+                    self.mode = m;
+                    self.status = None;
+                    self.reencrypt_confirmed = false;
+                }
+                ui.add_space(4.0);
+            }
+        });
+        ui.add_space(10.0);
+
         let context_line = match self.mode {
             Mode::Encrypt => "Enter a passphrase to encrypt this file. You'll need it to decrypt later — there is no recovery.",
             Mode::Decrypt => "Enter the passphrase used to encrypt this file.",
+            Mode::Scrub => "Removes EXIF/GPS, XMP, ID3 and document properties. Writes photo.clean.jpg beside the original — the source file is never modified.",
         };
         ui.label(
             egui::RichText::new(context_line)
@@ -1295,31 +1575,33 @@ impl NeuronEncryptApp {
                 .color(Palette::TEXT_MED),
         );
 
-        ui.add_space(12.0);
-        self.draw_password_row(ui, "Passphrase", true);
-
-        if self.mode == Mode::Encrypt {
+        if self.mode != Mode::Scrub {
             ui.add_space(12.0);
-            self.draw_password_row(ui, "Confirm passphrase", false);
+            self.draw_password_row(ui, "Passphrase", true);
 
-            if !self.password.is_empty()
-                && !self.confirm_password.is_empty()
-                && !constant_time_eq(self.password.as_bytes(), self.confirm_password.as_bytes())
-            {
-                ui.add_space(8.0);
-                self.draw_notice(
-                    ui,
-                    "Passphrases do not match",
-                    "Enter the same passphrase in both fields before continuing.",
-                    Palette::error_muted(),
-                    Palette::ERROR,
-                    Palette::ERROR,
-                );
+            if self.mode == Mode::Encrypt {
+                ui.add_space(12.0);
+                self.draw_password_row(ui, "Confirm passphrase", false);
+
+                if !self.password.is_empty()
+                    && !self.confirm_password.is_empty()
+                    && !constant_time_eq(self.password.as_bytes(), self.confirm_password.as_bytes())
+                {
+                    ui.add_space(8.0);
+                    self.draw_notice(
+                        ui,
+                        "Passphrases do not match",
+                        "Enter the same passphrase in both fields before continuing.",
+                        Palette::error_muted(),
+                        Palette::ERROR,
+                        Palette::ERROR,
+                    );
+                }
             }
-        }
 
-        ui.add_space(14.0);
-        self.draw_strength_meter(ui, strength_label);
+            ui.add_space(14.0);
+            self.draw_strength_meter(ui, strength_label);
+        }
 
         // P2-UI: Hide cipher/KDF details behind an "Advanced" CollapsingHeader.
         // Per UI research §7.5, non-experts don't need to see "AES-256-GCM-SIV
@@ -1451,6 +1733,22 @@ impl NeuronEncryptApp {
 
         let is_vx2 = self.selected_file.as_ref().is_some_and(|p| is_vx2_file(p));
 
+        if self.mode == Mode::Scrub {
+            if self
+                .draw_button(
+                    ui,
+                    "SCRUB METADATA",
+                    vec2(ui.available_width(), 44.0),
+                    ButtonKind::Primary,
+                    true,
+                )
+                .clicked()
+            {
+                self.execute(ctx);
+            }
+            return;
+        }
+
         if is_vx2 {
             let decrypt_disabled = self.password.chars().count() < crypto::MIN_PASSWORD_LEN;
             if self
@@ -1504,6 +1802,7 @@ impl NeuronEncryptApp {
         let action_text = match self.mode {
             Mode::Encrypt => "Encrypting...",
             Mode::Decrypt => "Decrypting...",
+            Mode::Scrub => "Removing metadata...",
         };
         let filename = self
             .selected_file
@@ -1761,10 +2060,23 @@ impl NeuronEncryptApp {
             Palette::TEXT_MED,
         );
 
-        ui.add_space(18.0);
+        ui.add_space(12.0);
+        if ui
+            .checkbox(&mut self.batch_scrub, "Scrub metadata only (no passphrase)")
+            .changed()
+        {
+            self.status = None;
+        }
+
+        ui.add_space(6.0);
         self.draw_password_row(ui, "Batch passphrase", true);
 
-        if self.mode == Mode::Encrypt {
+        if self.batch_scrub {
+            // Passphrase fields are irrelevant while scrubbing; blank them so
+            // stale input can't leak into a later encrypt run.
+            self.password = Zeroizing::new(String::new());
+            self.confirm_password = Zeroizing::new(String::new());
+        } else if self.mode == Mode::Encrypt {
             ui.add_space(12.0);
             self.draw_password_row(ui, "Confirm passphrase", false);
 
@@ -1788,8 +2100,9 @@ impl NeuronEncryptApp {
         self.draw_strength_meter(ui, strength_label);
 
         ui.add_space(20.0);
-        let mut enabled = self.password.chars().count() >= crypto::MIN_PASSWORD_LEN;
-        if self.mode == Mode::Encrypt {
+        let mut enabled =
+            self.batch_scrub || self.password.chars().count() >= crypto::MIN_PASSWORD_LEN;
+        if !self.batch_scrub && self.mode == Mode::Encrypt {
             enabled &= constant_time_eq(self.password.as_bytes(), self.confirm_password.as_bytes());
         }
 
@@ -1806,7 +2119,9 @@ impl NeuronEncryptApp {
             ui.add_space(12.0);
         }
 
-        let button_label = if self.mode == Mode::Encrypt {
+        let button_label = if self.batch_scrub {
+            "Scrub Metadata From All Files"
+        } else if self.mode == Mode::Encrypt {
             "Encrypt All Files"
         } else {
             "Decrypt All Files"

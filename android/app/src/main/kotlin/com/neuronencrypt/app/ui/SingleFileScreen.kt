@@ -42,7 +42,7 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
-enum class FileMode { Encrypt, Decrypt }
+enum class FileMode { Encrypt, Decrypt, Scrub }
 
 sealed class ProcessStatus {
     object Idle : ProcessStatus()
@@ -131,7 +131,11 @@ fun SingleFileScreen(
             status = ProcessStatus.Running(0.0f, "Initializing...")
 
             // Start ForegroundService to keep the process alive when backgrounded
-            val action = if (fileMode == FileMode.Encrypt) "Encrypting" else "Decrypting"
+            val action = when (fileMode) {
+                FileMode.Encrypt -> "Encrypting"
+                FileMode.Decrypt -> "Decrypting"
+                FileMode.Scrub -> "Removing metadata from"
+            }
             val serviceIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
                 setAction(com.neuronencrypt.app.CryptoService.ACTION_START)
                 putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName as String)
@@ -166,12 +170,19 @@ fun SingleFileScreen(
                 }
 
                 try {
-                    // Run crypto on IO dispatcher to avoid blocking the main thread
+                    // Run the native op on IO dispatcher to avoid blocking the main thread
                     val code = withContext(Dispatchers.IO) {
-                        if (fileMode == FileMode.Encrypt) {
-                            encrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
-                        } else {
-                            decrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
+                        when (fileMode) {
+                            FileMode.Encrypt -> encrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
+                            FileMode.Decrypt -> decrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
+                            FileMode.Scrub -> scrub(
+                                context.contentResolver,
+                                inputUri!!,
+                                uri,
+                                context.cacheDir.absolutePath,
+                                listener,
+                                cancelFlag
+                            )
                         }
                     }
 
@@ -179,7 +190,11 @@ fun SingleFileScreen(
                         val duration = System.currentTimeMillis() - startTime
                         // Use known output name and size instead of querying ContentResolver
                         // which can fail for newly created documents
-                        val outputName = defaultOutputName(fileMode, inputName)
+                        val outputName = if (fileMode == FileMode.Scrub) {
+                            defaultScrubOutputName(inputName)
+                        } else {
+                            defaultOutputName(fileMode, inputName)
+                        }
                         status = ProcessStatus.Success(
                             inputName = inputName,
                             outputName = outputName,
@@ -194,7 +209,13 @@ fun SingleFileScreen(
                         if (cancelFlag.get()) {
                             status = ProcessStatus.Cancelled
                         } else {
-                            status = ProcessStatus.Error("JNI execution returned error code: $code")
+                            val reason = when {
+                                code == -1 -> "Could not open the selected file."
+                                code == 2 && fileMode == FileMode.Scrub ->
+                                    "Unsupported format \u2014 metadata removal is not available for this file type. The file was left unmodified."
+                                else -> "Operation failed (error code $code)"
+                            }
+                            status = ProcessStatus.Error(reason)
                         }
                     }
                 } catch (e: CancellationException) {
@@ -307,13 +328,18 @@ fun SingleFileScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     // Mode Selection Tab (with warning/info if magic detected)
+                    val modeIndex = when (fileMode) {
+                        FileMode.Encrypt -> 0
+                        FileMode.Decrypt -> 1
+                        FileMode.Scrub -> 2
+                    }
                     TabRow(
-                        selectedTabIndex = if (fileMode == FileMode.Encrypt) 0 else 1,
+                        selectedTabIndex = modeIndex,
                         containerColor = Surface,
                         contentColor = Accent,
                         indicator = { tabPositions ->
                             TabRowDefaults.SecondaryIndicator(
-                                Modifier.tabIndicatorOffset(tabPositions[if (fileMode == FileMode.Encrypt) 0 else 1]),
+                                Modifier.tabIndicatorOffset(tabPositions[modeIndex]),
                                 color = Accent
                             )
                         },
@@ -330,6 +356,11 @@ fun SingleFileScreen(
                             selected = fileMode == FileMode.Decrypt,
                             onClick = { fileMode = FileMode.Decrypt },
                             text = { Text("Decrypt", fontFamily = JetBrainsMonoFamily) }
+                        )
+                        Tab(
+                            selected = fileMode == FileMode.Scrub,
+                            onClick = { fileMode = FileMode.Scrub },
+                            text = { Text("Scrub", fontFamily = JetBrainsMonoFamily) }
                         )
                     }
 
@@ -360,6 +391,27 @@ fun SingleFileScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
+                    if (fileMode == FileMode.Scrub) {
+                        Surface(
+                            color = Accent.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.border(1.dp, Border, RoundedCornerShape(8.dp))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "No passphrase needed \u2014 scrubbing removes EXIF/GPS, XMP, ID3 tags and document properties.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextMed
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Writes <name>.clean.<ext> beside the original. Unknown formats are rejected \u2014 nothing is modified on failure.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextLo
+                                )
+                            }
+                        }
+                    } else {
                     // Password Inputs
                     Text("PASSPHRASE", style = MaterialTheme.typography.labelSmall, color = TextLo)
                     Spacer(modifier = Modifier.height(8.dp))
@@ -447,15 +499,22 @@ fun SingleFileScreen(
                         }
                     }
 
+                    }
+
                     Spacer(modifier = Modifier.height(32.dp))
 
                     // Execute Button
-                    val isEnabled = password.length >= 8 &&
-                            (fileMode == FileMode.Decrypt || (password == confirmPassword))
+                    val isEnabled = fileMode == FileMode.Scrub ||
+                            (password.length >= 8 &&
+                            (fileMode == FileMode.Decrypt || (password == confirmPassword)))
 
                     Button(
                         onClick = {
-                            val defaultName = defaultOutputName(fileMode, inputName)
+                            val defaultName = if (fileMode == FileMode.Scrub) {
+                                defaultScrubOutputName(inputName)
+                            } else {
+                                defaultOutputName(fileMode, inputName)
+                            }
                             savePickerLauncher.launch(defaultName)
                         },
                         enabled = isEnabled,
@@ -469,7 +528,11 @@ fun SingleFileScreen(
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            text = if (fileMode == FileMode.Encrypt) "ENCRYPT" else "DECRYPT",
+                            text = when (fileMode) {
+                                FileMode.Encrypt -> "ENCRYPT"
+                                FileMode.Decrypt -> "DECRYPT"
+                                FileMode.Scrub -> "SCRUB METADATA"
+                            },
                             style = MaterialTheme.typography.labelLarge,
                             color = if (isEnabled) TextHi else TextLo
                         )
@@ -725,6 +788,11 @@ fun formatSize(bytes: Long): String {
     val exp = (Math.log(bytes.toDouble()) / Math.log(1024.0)).toInt()
     val pre = "KMGTPE"[exp - 1].toString()
     return String.format("%.2f %sB", bytes / Math.pow(1024.0, exp.toDouble()), pre)
+}
+
+fun defaultScrubOutputName(inputName: String): String {
+    val dot = inputName.lastIndexOf('.')
+    return if (dot <= 0) "$inputName.clean" else "${inputName.substring(0, dot)}.clean${inputName.substring(dot)}"
 }
 
 fun defaultOutputName(mode: FileMode, inputName: String): String {

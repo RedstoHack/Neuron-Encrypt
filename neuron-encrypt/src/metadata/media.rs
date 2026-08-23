@@ -61,5 +61,8 @@ pub fn scrub_media_file(src: &Path, dest: &Path) -> CryptoResult<Vec<String>> {
         .save_to_path(dest, WriteOptions::new())
         .map_err(|e| CryptoError::ScrubFailed(format!("media rewrite failed: {e}")))?;
 
-    Ok(tag_types.iter().map(|tt| tag_type_name(*tt).to_string()).collect())
+    Ok(tag_types
+        .iter()
+        .map(|tt| tag_type_name(*tt).to_string())
+        .collect())
 }

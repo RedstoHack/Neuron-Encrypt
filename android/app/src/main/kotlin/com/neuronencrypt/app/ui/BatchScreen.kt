@@ -123,7 +123,11 @@ fun BatchScreen(onBack: () -> Unit) {
                 val parentDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId)
 
                 // Keep the process alive if the app is backgrounded mid-batch
-                val action = if (fileMode == FileMode.Encrypt) "Encrypting" else "Decrypting"
+                val action = when (fileMode) {
+                    FileMode.Encrypt -> "Encrypting"
+                    FileMode.Decrypt -> "Decrypting"
+                    FileMode.Scrub -> "Removing metadata from"
+                }
                 val serviceIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
                     setAction(com.neuronencrypt.app.CryptoService.ACTION_START)
                     putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, "Batch ($total files)")
@@ -143,7 +147,11 @@ fun BatchScreen(onBack: () -> Unit) {
                         item.status = "Processing"
                         batchStatus = BatchStatus.Processing(i, total, item.name, "Initializing...", 0f)
 
-                        val defaultName = defaultOutputName(fileMode, item.name)
+                        val defaultName = if (fileMode == FileMode.Scrub) {
+                            defaultScrubOutputName(item.name)
+                        } else {
+                            defaultOutputName(fileMode, item.name)
+                        }
 
                         var outUri: Uri? = null
                         try {
@@ -182,10 +190,17 @@ fun BatchScreen(onBack: () -> Unit) {
                             }
 
                             val code = withContext(Dispatchers.IO) {
-                                if (fileMode == FileMode.Encrypt) {
-                                    encrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
-                                } else {
-                                    decrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
+                                when (fileMode) {
+                                    FileMode.Encrypt -> encrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
+                                    FileMode.Decrypt -> decrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
+                                    FileMode.Scrub -> scrub(
+                                        context.contentResolver,
+                                        item.uri,
+                                        outUri,
+                                        context.cacheDir.absolutePath,
+                                        listener,
+                                        cancelFlag
+                                    )
                                 }
                             }
 
@@ -194,7 +209,12 @@ fun BatchScreen(onBack: () -> Unit) {
                             } else {
                                 deleteDocumentQuietly(context, outUri)
                                 item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
-                                item.error = if (cancelFlag.get()) "Cancelled" else "Native error code: $code"
+                                item.error = when {
+                                    cancelFlag.get() -> "Cancelled"
+                                    code == 2 && fileMode == FileMode.Scrub ->
+                                        "Unsupported format \u2014 skipped, file untouched"
+                                    else -> "Native error code: $code"
+                                }
                             }
                         } catch (e: CancellationException) {
                             // Re-raise so cancelled coroutines never mark files as
@@ -306,13 +326,18 @@ fun BatchScreen(onBack: () -> Unit) {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Mode tabs
+                    val modeIndex = when (fileMode) {
+                        FileMode.Encrypt -> 0
+                        FileMode.Decrypt -> 1
+                        FileMode.Scrub -> 2
+                    }
                     TabRow(
-                        selectedTabIndex = if (fileMode == FileMode.Encrypt) 0 else 1,
+                        selectedTabIndex = modeIndex,
                         containerColor = Surface,
                         contentColor = Accent,
                         indicator = { tabPositions ->
                             TabRowDefaults.SecondaryIndicator(
-                                Modifier.tabIndicatorOffset(tabPositions[if (fileMode == FileMode.Encrypt) 0 else 1]),
+                                Modifier.tabIndicatorOffset(tabPositions[modeIndex]),
                                 color = Accent
                             )
                         },
@@ -329,6 +354,11 @@ fun BatchScreen(onBack: () -> Unit) {
                             selected = fileMode == FileMode.Decrypt,
                             onClick = { fileMode = FileMode.Decrypt },
                             text = { Text("Decrypt", fontFamily = JetBrainsMonoFamily) }
+                        )
+                        Tab(
+                            selected = fileMode == FileMode.Scrub,
+                            onClick = { fileMode = FileMode.Scrub },
+                            text = { Text("Scrub", fontFamily = JetBrainsMonoFamily) }
                         )
                     }
 
@@ -395,6 +425,21 @@ fun BatchScreen(onBack: () -> Unit) {
                         }
                     }
 
+                    if (fileMode == FileMode.Scrub) {
+                        Surface(
+                            color = Accent.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.border(1.dp, Border, RoundedCornerShape(8.dp))
+                        ) {
+                            Text(
+                                text = "No passphrase needed \u2014 each file gets scrubbed and saved as <name>.clean.<ext> in the destination folder. Unsupported formats are skipped untouched.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextMed,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    } else {
+
                     if (fileMode == FileMode.Encrypt) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("CONFIRM PASSPHRASE", style = MaterialTheme.typography.labelSmall, color = TextLo)
@@ -421,10 +466,13 @@ fun BatchScreen(onBack: () -> Unit) {
                         }
                     }
 
+                    }
+
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    val isEnabled = password.length >= 8 &&
-                            (fileMode == FileMode.Decrypt || (password == confirmPassword))
+                    val isEnabled = fileMode == FileMode.Scrub ||
+                            (password.length >= 8 &&
+                            (fileMode == FileMode.Decrypt || (password == confirmPassword)))
 
                     Button(
                         onClick = { dirPickerLauncher.launch(null) },

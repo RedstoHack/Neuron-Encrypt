@@ -62,10 +62,11 @@ impl CancelableReader {
 impl Read for CancelableReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.is_cancelled() {
-            return Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                CANCELLED_IO_MESSAGE,
-            ));
+            // Not ErrorKind::Interrupted: std's read loops (and the core's
+            // read_exact_or_eof) treat Interrupted as "retry", which would
+            // spin forever once the flag latches. A distinct error kind
+            // propagates as a real failure; map_error recognises it below.
+            return Err(io::Error::other(CANCELLED_IO_MESSAGE));
         }
         self.inner.read(buf)
     }
@@ -74,13 +75,15 @@ impl Read for CancelableReader {
 impl Seek for CancelableReader {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         if self.is_cancelled() {
-            return Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                CANCELLED_IO_MESSAGE,
-            ));
+            return Err(io::Error::other(CANCELLED_IO_MESSAGE));
         }
         self.inner.seek(pos)
     }
+}
+
+fn is_cancellation(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::Interrupted
+        || err.kind() == io::ErrorKind::Other && err.to_string() == CANCELLED_IO_MESSAGE
 }
 
 struct JniReporter {
@@ -109,9 +112,7 @@ impl ProgressReporter for JniReporter {
 
 fn map_error(env: &mut JNIEnv, err: CryptoError) -> jint {
     let (code, message) = match err {
-        CryptoError::Io(ref io_err) if io_err.kind() == io::ErrorKind::Interrupted => {
-            (1, "Cancelled".to_owned())
-        }
+        CryptoError::Io(ref io_err) if is_cancellation(io_err) => (1, "Cancelled".to_owned()),
         CryptoError::DecryptionFailed
         | CryptoError::InvalidMagic
         | CryptoError::UnsupportedVersion(_)
@@ -135,6 +136,11 @@ fn map_error(env: &mut JNIEnv, err: CryptoError) -> jint {
         CryptoError::Argon2Failed(_)
         | CryptoError::HkdfFailed(_)
         | CryptoError::EncryptionFailed(_) => (1, "Cryptographic operation failed.".to_owned()),
+        CryptoError::UnsupportedMediaFormat(reason) => {
+            (2, format!("Unsupported format \u{2014} {reason}"))
+        }
+        CryptoError::MalformedFile(detail) => (1, format!("Corrupted file: {detail}")),
+        CryptoError::ScrubFailed(detail) => (1, format!("Metadata removal failed: {detail}")),
         CryptoError::Cancelled => (1, "Cancelled".to_owned()),
     };
 
@@ -196,13 +202,25 @@ fn native_encrypt_impl(
     // disk. We own the dup'd copies here and close them on drop.
     let input_dup = match duplicate_fd(input_fd) {
         Some(fd) => fd,
-        None => return fail_with_exception(env, password, 1, "Failed to duplicate input file descriptor."),
+        None => {
+            return fail_with_exception(
+                env,
+                password,
+                1,
+                "Failed to duplicate input file descriptor.",
+            )
+        }
     };
     let output_dup = match duplicate_fd(output_fd) {
         Some(fd) => fd,
         None => {
             unsafe { libc::close(input_dup) };
-            return fail_with_exception(env, password, 1, "Failed to duplicate output file descriptor.");
+            return fail_with_exception(
+                env,
+                password,
+                1,
+                "Failed to duplicate output file descriptor.",
+            );
         }
     };
 
@@ -293,13 +311,25 @@ fn native_decrypt_impl(
     // Duplicate (not detach) the fds — see native_encrypt_impl for the rationale.
     let input_dup = match duplicate_fd(input_fd) {
         Some(fd) => fd,
-        None => return fail_with_exception(env, password, 1, "Failed to duplicate input file descriptor."),
+        None => {
+            return fail_with_exception(
+                env,
+                password,
+                1,
+                "Failed to duplicate input file descriptor.",
+            )
+        }
     };
     let output_dup = match duplicate_fd(output_fd) {
         Some(fd) => fd,
         None => {
             unsafe { libc::close(input_dup) };
-            return fail_with_exception(env, password, 1, "Failed to duplicate output file descriptor.");
+            return fail_with_exception(
+                env,
+                password,
+                1,
+                "Failed to duplicate output file descriptor.",
+            );
         }
     };
 
@@ -463,6 +493,401 @@ pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nat
         Ok(code) => code,
         Err(_) => {
             zero_java_array(&mut env, &password);
+            let _ = env.throw_new(EXCEPTION_CLASS, "Unexpected native failure.");
+            1
+        }
+    }
+}
+
+// ===========================================================================
+// Metadata scrubbing (v2.2.0)
+//
+// Design note - why staging instead of in-memory or direct streaming:
+// Encryption is a pure sequential byte transform, so it streams natively.
+// Metadata removal rewrites container structure; several formats carry
+// absolute byte offsets (MP4 stco tables, TIFF IFDs, PDF xref) that shift
+// when metadata is excised, so single-pass stream rewriting is not safely
+// possible for every supported format. Instead of loading whole files into
+// RAM, the input descriptor is copied to the app-private cache directory
+// through a fixed 1 MiB buffer, the battle-tested path-based `scrub_file`
+// runs there (audio/video containers are streamed by lofty internally), and
+// the result streams back to the output descriptor. Peak RSS stays flat
+// regardless of file size; the cost is temporary disk usage (~2x source),
+// guarded by a free-space check before scrubbing begins.
+// ===========================================================================
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0F) as usize] as char);
+    }
+    out
+}
+
+fn random_token() -> String {
+    let mut bytes = [0u8; 8];
+    if let Ok(mut f) = File::open("/dev/urandom") {
+        if f.read_exact(&mut bytes).is_ok() {
+            return hex_encode(&bytes);
+        }
+    }
+    // Fallback entropy: wall clock + pid (uniqueness within one process).
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+        ^ ((unsafe { libc::getpid() } as u64) << 32);
+    hex_encode(nanos.to_le_bytes().as_slice())
+}
+
+/// Polls the Java-side AtomicBoolean into a Rust Arc<AtomicBool> so core
+/// operations can observe cancellation at their chunk boundaries without
+/// making JNI calls from the worker thread.
+struct CancelBridge {
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+    rust_flag: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl CancelBridge {
+    fn spawn(vm: Arc<JavaVM>, java_flag: GlobalRef) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let stop = Arc::new(AtomicBool::new(false));
+        let rust_flag = Arc::new(AtomicBool::new(false));
+        let stop2 = Arc::clone(&stop);
+        let rust2 = Arc::clone(&rust_flag);
+
+        let handle = std::thread::spawn(move || loop {
+            if stop2.load(Ordering::SeqCst) {
+                break;
+            }
+            let cancelled = vm
+                .attach_current_thread()
+                .ok()
+                .and_then(|mut env| env.call_method(&java_flag, "get", "()Z", &[]).ok())
+                .and_then(|res| res.z().ok())
+                .unwrap_or(false);
+            if cancelled {
+                rust2.store(true, Ordering::SeqCst);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        });
+
+        Self {
+            stop,
+            handle: Some(handle),
+            rust_flag,
+        }
+    }
+
+    fn flag(&self) -> &Arc<std::sync::atomic::AtomicBool> {
+        &self.rust_flag
+    }
+}
+
+impl Drop for CancelBridge {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Rescales an inner reporter's [0,1] progress into [lo,hi] so multi-phase
+/// operations present monotonic overall progress to the UI.
+struct PhaseReporter<'a> {
+    inner: &'a JniReporter,
+    lo: f32,
+    hi: f32,
+}
+
+impl ProgressReporter for PhaseReporter<'_> {
+    fn report(&self, progress: f32, message: &str) {
+        let scaled = self.lo + progress.clamp(0.0, 1.0) * (self.hi - self.lo);
+        self.inner.report(scaled, message);
+    }
+}
+
+const SCRUB_STAGE_BUFFER: usize = 1024 * 1024;
+const SCRUB_MIN_HEADROOM: u64 = 8 * 1024 * 1024;
+
+fn cache_free_bytes(dir: &std::path::Path) -> Option<u64> {
+    let c = std::ffi::CString::new(dir.to_str()?).ok()?;
+    let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statvfs(c.as_ptr(), &mut vfs) };
+    if rc != 0 {
+        return None;
+    }
+    Some(vfs.f_bavail as u64 * vfs.f_bsize as u64)
+}
+
+fn native_scrub_impl(
+    env: &mut JNIEnv,
+    input_fd: jint,
+    output_fd: jint,
+    cache_dir: &std::ffi::CStr,
+    progress_listener: &JObject,
+    _cancel_flag: &JObject,
+) -> jint {
+    use std::io::Read;
+    use std::sync::atomic::Ordering;
+
+    if input_fd < 0 || output_fd < 0 {
+        let _ = env.throw_new(EXCEPTION_CLASS, "Invalid file descriptor.");
+        return 2;
+    }
+
+    let input_dup = match duplicate_fd(input_fd) {
+        Some(fd) => fd,
+        None => {
+            let _ = env.throw_new(
+                EXCEPTION_CLASS,
+                "Failed to duplicate input file descriptor.",
+            );
+            return 1;
+        }
+    };
+    let output_dup = match duplicate_fd(output_fd) {
+        Some(fd) => fd,
+        None => {
+            unsafe { libc::close(input_dup) };
+            let _ = env.throw_new(
+                EXCEPTION_CLASS,
+                "Failed to duplicate output file descriptor.",
+            );
+            return 1;
+        }
+    };
+
+    let mut input_file = unsafe { File::from_raw_fd(input_dup) };
+    let mut output_file = DurableFile(unsafe { File::from_raw_fd(output_dup) });
+
+    let vm = match env.get_java_vm() {
+        Ok(v) => Arc::new(v),
+        Err(_) => {
+            let _ = env.throw_new(EXCEPTION_CLASS, "Failed to access JVM.");
+            return 1;
+        }
+    };
+
+    let listener_ref = match env.new_global_ref(progress_listener) {
+        Ok(r) => r,
+        Err(_) => {
+            let _ = env.throw_new(EXCEPTION_CLASS, "Failed to retain progress listener.");
+            return 1;
+        }
+    };
+    let reporter = JniReporter {
+        listener: listener_ref,
+        vm: Arc::clone(&vm),
+    };
+
+    // Second global ref owned by the watcher thread.
+    let cancel_java_ref = match env.new_global_ref(_cancel_flag) {
+        Ok(r) => r,
+        Err(_) => {
+            let _ = env.throw_new(EXCEPTION_CLASS, "Failed to retain cancellation flag.");
+            return 1;
+        }
+    };
+    let bridge = CancelBridge::spawn(Arc::clone(&vm), cancel_java_ref);
+
+    let dir = std::path::PathBuf::from(cache_dir.to_string_lossy().as_ref());
+    let token = random_token();
+    let staged_in = dir.join(format!("neuron-scrub-{token}.in"));
+    let staged_out = dir.join(format!("neuron-scrub-{token}.out"));
+
+    // Runs to completion regardless of outcome; temps are always removed.
+    let outcome = (|| -> Result<neuron_encrypt_core::metadata::ScrubReport, CryptoError> {
+        if !dir.is_dir() {
+            return Err(CryptoError::InvalidDestination(dir));
+        }
+
+        // ---- Phase 1: stage input -> cache temp through a fixed buffer ----
+        reporter.report(0.02, "Staging file...");
+        let source_len = input_file.metadata()?.len();
+        let staged_len = {
+            let mut staged = fs_create_private(&staged_in)?;
+            let mut chunk = vec![0u8; SCRUB_STAGE_BUFFER];
+            let mut copied: u64 = 0;
+            loop {
+                if bridge.flag().load(Ordering::SeqCst) {
+                    return Err(CryptoError::Cancelled);
+                }
+                let n = input_file.read(&mut chunk)?;
+                if n == 0 {
+                    break;
+                }
+                staged.write_all(&chunk[..n])?;
+                copied += n as u64;
+                if source_len > 0 {
+                    reporter.report(
+                        0.02 + 0.10 * (copied as f32 / source_len as f32),
+                        "Staging file...",
+                    );
+                }
+            }
+            staged.flush()?;
+            copied
+        };
+        drop(input_file);
+
+        // ---- Free-space guard: the scrub writes a second copy beside it ----
+        if let Some(free) = cache_free_bytes(&dir) {
+            let needed = staged_len.saturating_mul(2) + SCRUB_MIN_HEADROOM;
+            if free < needed {
+                return Err(CryptoError::Io(io::Error::new(
+                    io::ErrorKind::StorageFull,
+                    "not enough free space in the app cache directory",
+                )));
+            }
+        }
+
+        // ---- Phase 2: core scrubber on the staged paths ----
+        let phase2 = PhaseReporter {
+            inner: &reporter,
+            lo: 0.15,
+            hi: 0.90,
+        };
+        neuron_encrypt_core::metadata::scrub_file(
+            &staged_in,
+            Some(&staged_out),
+            neuron_encrypt_core::metadata::ScrubOutput::CleanedCopy,
+            false,
+            &phase2,
+            Some(bridge.flag()),
+        )
+    })();
+
+    // ---- Phase 3: stream result back to the output descriptor ----
+    let final_result = outcome.and_then(|report| {
+        reporter.report(0.92, "Writing output...");
+        let out_len = std::fs::metadata(&staged_out)?.len();
+        let mut src = File::open(&staged_out)?;
+        let mut chunk = vec![0u8; SCRUB_STAGE_BUFFER];
+        let mut copied: u64 = 0;
+        loop {
+            if bridge.flag().load(Ordering::SeqCst) {
+                return Err(CryptoError::Cancelled);
+            }
+            let n = src.read(&mut chunk)?;
+            if n == 0 {
+                break;
+            }
+            output_file.write_all(&chunk[..n])?;
+            copied += n as u64;
+            if out_len > 0 {
+                reporter.report(
+                    0.92 + 0.07 * (copied as f32 / out_len as f32),
+                    "Writing output...",
+                );
+            }
+        }
+        output_file.flush()?;
+        let _ = output_file.0.sync_all();
+        Ok(report)
+    });
+
+    // Durability contract matches encrypt/decrypt: full sync best-effort done
+    // above; temps are always removed.
+    drop(output_file);
+    let _ = std::fs::remove_file(&staged_in);
+    let _ = std::fs::remove_file(&staged_out);
+
+    match final_result {
+        Ok(report) => {
+            let summary = if report.removed.is_empty() {
+                format!("{}: no removable metadata", report.format.name())
+            } else {
+                format!(
+                    "{}: removed {}",
+                    report.format.name(),
+                    report.removed.join("; ")
+                )
+            };
+            reporter.report(1.00, &summary);
+            0
+        }
+        Err(CryptoError::UnsupportedMediaFormat(reason)) => {
+            let _ = env.throw_new(
+                EXCEPTION_CLASS,
+                format!("Unsupported format \u{2014} {reason}"),
+            );
+            2
+        }
+        Err(e) => map_error(env, e),
+    }
+}
+
+/// Creates a scratch file with private permissions (best-effort on unix).
+fn fs_create_private(path: &std::path::Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(Into::into)
+    }
+}
+
+/// JNI entry point for `NeuronEncryptNative.nativeScrub`.
+///
+/// # Safety
+///
+/// Same fd contract as the encrypt/decrypt entry points: the Java side must
+/// keep both original `ParcelFileDescriptor`s open until this returns. The
+/// input is staged through the app-private cache directory (never fully held
+/// in RAM); temporary files are deleted on every exit path.
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nativeScrub(
+    mut env: JNIEnv,
+    _class: JClass,
+    input_fd: jint,
+    output_fd: jint,
+    cache_dir: jni::objects::JString,
+    progress_listener: JObject,
+    cancel_flag: JObject,
+) -> jint {
+    let res = panic::catch_unwind(AssertUnwindSafe(|| {
+        let dir = match env.get_string(&cache_dir) {
+            Ok(s) => s.to_string_lossy().into_owned(),
+            Err(_) => {
+                let _ = env.throw_new(EXCEPTION_CLASS, "Invalid cache directory path.");
+                return 2;
+            }
+        };
+        let Ok(dir_cstr) = std::ffi::CString::new(dir) else {
+            let _ = env.throw_new(EXCEPTION_CLASS, "Cache directory path contains a NUL byte.");
+            return 2;
+        };
+        native_scrub_impl(
+            &mut env,
+            input_fd,
+            output_fd,
+            &dir_cstr,
+            &progress_listener,
+            &cancel_flag,
+        )
+    }));
+
+    match res {
+        Ok(code) => code,
+        Err(_) => {
             let _ = env.throw_new(EXCEPTION_CLASS, "Unexpected native failure.");
             1
         }

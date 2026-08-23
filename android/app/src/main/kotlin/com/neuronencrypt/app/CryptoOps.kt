@@ -12,33 +12,27 @@ fun encrypt(
     listener: ProgressListener,
     cancelFlag: AtomicBoolean
 ): Int {
-    val inputFd = contentResolver.openFileDescriptor(inputUri, "r")
-    val outputFd = contentResolver.openFileDescriptor(outputUri, "w")
-    if (inputFd == null || outputFd == null) {
-        inputFd?.close()
-        outputFd?.close()
-        zeroByteArray(password)
-        return -1
-    }
-    val sourceSize = inputFd.statSize
+    val inputFd = contentResolver.openFileDescriptor(inputUri, "r") ?: return -1
     try {
-        // Pass the raw fds WITHOUT detaching. detachFd() invalidates the Java
-        // ParcelFileDescriptor immediately, so the content provider receives
-        // its close signal before any bytes are written and finalizes the file
-        // at 0 bytes (tauri #3356). The native side dup()s the fds and closes
-        // its own copies; we keep the originals open and close them here only
-        // after the whole write has completed.
-        return NeuronEncryptNative.nativeEncrypt(
-            inputFd.fd,
-            outputFd.fd,
-            password,
-            sourceSize,
-            listener,
-            cancelFlag
-        )
+        val outputFd = contentResolver.openFileDescriptor(outputUri, "w") ?: return -1
+        try {
+            val sourceSize = inputFd.statSize
+            // Pass the raw fds WITHOUT detaching (see rationale in git history /
+            // v2.1.2 notes): detach invalidates the Java descriptor early and
+            // providers finalize the file at 0 bytes.
+            return NeuronEncryptNative.nativeEncrypt(
+                inputFd.fd,
+                outputFd.fd,
+                password,
+                sourceSize,
+                listener,
+                cancelFlag
+            )
+        } finally {
+            outputFd.close()
+        }
     } finally {
         inputFd.close()
-        outputFd.close()
         zeroByteArray(password)
     }
 }
@@ -51,29 +45,52 @@ fun decrypt(
     listener: ProgressListener,
     cancelFlag: AtomicBoolean
 ): Int {
-    val inputFd = contentResolver.openFileDescriptor(inputUri, "r")
-    val outputFd = contentResolver.openFileDescriptor(outputUri, "w")
-    if (inputFd == null || outputFd == null) {
-        inputFd?.close()
-        outputFd?.close()
-        zeroByteArray(password)
-        return -1
-    }
-    val sourceSize = inputFd.statSize
+    val inputFd = contentResolver.openFileDescriptor(inputUri, "r") ?: return -1
     try {
-        // Pass the raw fds WITHOUT detaching — see encrypt() for the rationale.
-        return NeuronEncryptNative.nativeDecrypt(
-            inputFd.fd,
-            outputFd.fd,
-            password,
-            sourceSize,
-            listener,
-            cancelFlag
-        )
+        val outputFd = contentResolver.openFileDescriptor(outputUri, "w") ?: return -1
+        try {
+            val sourceSize = inputFd.statSize
+            return NeuronEncryptNative.nativeDecrypt(
+                inputFd.fd,
+                outputFd.fd,
+                password,
+                sourceSize,
+                listener,
+                cancelFlag
+            )
+        } finally {
+            outputFd.close()
+        }
     } finally {
         inputFd.close()
-        outputFd.close()
         zeroByteArray(password)
+    }
+}
+
+fun scrub(
+    contentResolver: ContentResolver,
+    inputUri: Uri,
+    outputUri: Uri,
+    cacheDir: String,
+    listener: ProgressListener,
+    cancelFlag: AtomicBoolean
+): Int {
+    val inputFd = contentResolver.openFileDescriptor(inputUri, "r") ?: return -1
+    try {
+        val outputFd = contentResolver.openFileDescriptor(outputUri, "w") ?: return -1
+        try {
+            return NeuronEncryptNative.nativeScrub(
+                inputFd.fd,
+                outputFd.fd,
+                cacheDir,
+                listener,
+                cancelFlag
+            )
+        } finally {
+            outputFd.close()
+        }
+    } finally {
+        inputFd.close()
     }
 }
 

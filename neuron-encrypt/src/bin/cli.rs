@@ -8,6 +8,7 @@ use clap_complete::{generate, Shell};
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use neuron_encrypt_core::crypto::{self, ProgressReporter, ThrottledReporter};
 use neuron_encrypt_core::error::CryptoError;
+use neuron_encrypt_core::metadata;
 use neuron_encrypt_core::utils::{constant_time_eq, is_vx2_file, HumanBytes};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -45,6 +46,12 @@ Supports piping, progress bars, JSON output, and silent mode for scripts.",
 
   # Pipe data through CLI
   cat backup.tar.gz | neuron-encrypt-cli decrypt -i - -o backup.tar.gz
+
+  # Remove metadata from a photo (writes photo.clean.jpg)
+  neuron-encrypt-cli scrub -i photo.jpg
+
+  # Scrub in place, replacing the original
+  neuron-encrypt-cli scrub -i video.mp4 --in-place
 
   # JSON output for automation
   neuron-encrypt-cli encrypt -i secret.pdf --json
@@ -106,6 +113,25 @@ enum Command {
         /// Output file path (use "-" for stdout, defaults to original name)
         #[arg(short, long)]
         output: Option<String>,
+    },
+    /// Remove metadata (EXIF, GPS, ID3, document properties) from a file
+    Scrub {
+        /// Input file path (piped input is not supported)
+        #[arg(short, long)]
+        input: String,
+
+        /// Output path (defaults to <name>.clean.<ext> beside the input)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Replace the input file in place instead of writing a cleaned copy
+        #[arg(long)]
+        in_place: bool,
+
+        /// After writing the cleaned copy, securely wipe the original
+        /// (ignored with --in-place; best-effort on flash storage)
+        #[arg(long)]
+        wipe_original: bool,
     },
 }
 
@@ -256,10 +282,16 @@ impl ProgressReporter for QuietReporter {
 #[derive(Serialize)]
 struct JsonResult {
     status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation: Option<String>,
     output_path: Option<String>,
     bytes_processed: Option<u64>,
     duration_ms: u128,
     sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    removed: Option<Vec<String>>,
     error: Option<String>,
 }
 
@@ -319,7 +351,15 @@ fn validate_output_path(
             "Output file already exists: {}. Use --force to overwrite.",
             output_path.display()
         );
-        emit_json_result(json, start, Some(output_path.display().to_string()), None, None, "error", Some(msg.clone()));
+        emit_json_result(
+            json,
+            start,
+            Some(output_path.display().to_string()),
+            None,
+            None,
+            "error",
+            Some(msg.clone()),
+        );
         eprintln!("Error: {msg}");
         return Err((ExitCode::BadInput, msg));
     }
@@ -339,14 +379,30 @@ fn validate_output_path(
 
     if same_path(&input, &output) {
         let msg = "Refusing to overwrite the input file in place.".to_owned();
-        emit_json_result(json, start, Some(output_path.display().to_string()), None, None, "error", Some(msg.clone()));
+        emit_json_result(
+            json,
+            start,
+            Some(output_path.display().to_string()),
+            None,
+            None,
+            "error",
+            Some(msg.clone()),
+        );
         eprintln!("Error: {msg}");
         return Err((ExitCode::BadInput, msg));
     }
 
     if output_path.is_dir() {
         let msg = format!("Output path is a directory: {}", output_path.display());
-        emit_json_result(json, start, Some(output_path.display().to_string()), None, None, "error", Some(msg.clone()));
+        emit_json_result(
+            json,
+            start,
+            Some(output_path.display().to_string()),
+            None,
+            None,
+            "error",
+            Some(msg.clone()),
+        );
         eprintln!("Error: {msg}");
         return Err((ExitCode::BadInput, msg));
     }
@@ -369,10 +425,13 @@ fn emit_json(result: &JsonResult) {
 fn err_json(start: &Instant, output: Option<String>, msg: &str) -> JsonResult {
     JsonResult {
         status: "error".into(),
+        operation: None,
         output_path: output,
         bytes_processed: None,
         duration_ms: start.elapsed().as_millis(),
         sha256: None,
+        format: None,
+        removed: None,
         error: Some(msg.into()),
     }
 }
@@ -393,10 +452,13 @@ fn emit_success_json(
     if json {
         emit_json(&JsonResult {
             status: "success".into(),
+            operation: None,
             output_path: output,
             bytes_processed,
             duration_ms: start.elapsed().as_millis(),
             sha256,
+            format: None,
+            removed: None,
             error: None,
         });
     }
@@ -414,10 +476,13 @@ fn emit_json_result(
     if json {
         emit_json(&JsonResult {
             status: status.to_string(),
+            operation: None,
             output_path: output,
             bytes_processed,
             duration_ms: start.elapsed().as_millis(),
             sha256,
+            format: None,
+            removed: None,
             error,
         });
     }
@@ -472,14 +537,25 @@ fn run_file(
     let source_size = fs::metadata(&input_path).ok().map(|m| m.len());
     let output_path = resolve_output(&input_path, mode, output_str);
 
-    if let Err((code, msg)) = validate_output_path(&input_path, &output_path, cli.force, cli.json, &start) {
-        emit_error_json(cli.json, &start, Some(output_path.display().to_string()), &msg);
+    if let Err((code, msg)) =
+        validate_output_path(&input_path, &output_path, cli.force, cli.json, &start)
+    {
+        emit_error_json(
+            cli.json,
+            &start,
+            Some(output_path.display().to_string()),
+            &msg,
+        );
         eprintln!("Error: {msg}");
         return Err(code);
     }
 
     if !cli.quiet && !cli.json {
-        let action = if mode == "encrypt" { "Encrypting" } else { "Decrypting" };
+        let action = if mode == "encrypt" {
+            "Encrypting"
+        } else {
+            "Decrypting"
+        };
         let total = source_size.unwrap_or(0);
         eprintln!(
             "{} {}{} → {}",
@@ -523,7 +599,13 @@ fn run_file(
             let elapsed = start.elapsed().as_millis();
             if mode == "encrypt" {
                 let hash = compute_sha256(&input_path).ok();
-                emit_success_json(cli.json, &start, Some(dest.display().to_string()), source_size, hash.clone());
+                emit_success_json(
+                    cli.json,
+                    &start,
+                    Some(dest.display().to_string()),
+                    source_size,
+                    hash.clone(),
+                );
                 if !cli.quiet && !cli.json {
                     eprintln!(
                         "✓ Written to {} ({:.2}s)",
@@ -536,7 +618,13 @@ fn run_file(
                 }
             } else {
                 let hash = compute_sha256(&dest).ok();
-                emit_success_json(cli.json, &start, Some(dest.display().to_string()), source_size, hash.clone());
+                emit_success_json(
+                    cli.json,
+                    &start,
+                    Some(dest.display().to_string()),
+                    source_size,
+                    hash.clone(),
+                );
                 if !cli.quiet && !cli.json {
                     eprintln!(
                         "✓ Written to {} ({:.2}s)",
@@ -552,7 +640,12 @@ fn run_file(
         }
         Err(CryptoError::DecryptionFailed) => {
             let msg = "Wrong passphrase or corrupted file.";
-            emit_error_json(cli.json, &start, Some(output_path.display().to_string()), msg);
+            emit_error_json(
+                cli.json,
+                &start,
+                Some(output_path.display().to_string()),
+                msg,
+            );
             if !cli.json {
                 eprintln!("✗ {msg}");
             }
@@ -560,7 +653,12 @@ fn run_file(
         }
         Err(e) => {
             let msg = e.to_string();
-            emit_error_json(cli.json, &start, Some(output_path.display().to_string()), &msg);
+            emit_error_json(
+                cli.json,
+                &start,
+                Some(output_path.display().to_string()),
+                &msg,
+            );
             if !cli.json {
                 eprintln!("✗ {msg}");
             }
@@ -569,6 +667,7 @@ fn run_file(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_stream(
     cli: &Cli,
     start: Instant,
@@ -587,7 +686,11 @@ fn run_stream(
     };
 
     if !cli.quiet && !cli.json {
-        let action = if mode == "encrypt" { "Encrypting" } else { "Decrypting" };
+        let action = if mode == "encrypt" {
+            "Encrypting"
+        } else {
+            "Decrypting"
+        };
         eprintln!(
             "{} stdin → stdout{}",
             action,
@@ -627,13 +730,7 @@ fn run_stream(
             };
             let stdout = io::stdout();
             let mut stdout_lock = stdout.lock();
-            crypto::encrypt_stream(
-                &mut f,
-                &mut stdout_lock,
-                password,
-                source_size,
-                &throttled,
-            )
+            crypto::encrypt_stream(&mut f, &mut stdout_lock, password, source_size, &throttled)
         }
     } else {
         let mut reader: Box<dyn ReadSeek> = if is_pipe_in {
@@ -687,13 +784,7 @@ fn run_stream(
                     return Err(ExitCode::BadInput);
                 }
             };
-            crypto::decrypt_stream(
-                &mut reader,
-                &mut out,
-                password,
-                source_size,
-                &throttled,
-            )
+            crypto::decrypt_stream(&mut reader, &mut out, password, source_size, &throttled)
         } else {
             let msg = "Output path is required when decrypting piped input unless -o - is set.";
             emit_error_json(cli.json, &start, None, msg);
@@ -730,6 +821,134 @@ fn run_stream(
     }
 }
 
+fn run_scrub(
+    cli: &Cli,
+    start: Instant,
+    input_str: &str,
+    output_str: &Option<String>,
+    in_place: bool,
+    wipe_original: bool,
+) -> Result<(), ExitCode> {
+    let input_path = PathBuf::from(input_str);
+    if !input_path.exists() {
+        let msg = format!("Input file not found: {}", input_path.display());
+        emit_error_json(cli.json, &start, None, &msg);
+        eprintln!("Error: {msg}");
+        return Err(ExitCode::BadInput);
+    }
+    if input_str == "-" {
+        let msg = "Metadata scrubbing requires a seekable file; piped input is not supported.";
+        emit_error_json(cli.json, &start, None, msg);
+        eprintln!("Error: {msg}");
+        return Err(ExitCode::BadInput);
+    }
+
+    let mode = if in_place {
+        metadata::ScrubOutput::InPlace
+    } else {
+        metadata::ScrubOutput::CleanedCopy
+    };
+
+    // Explicit destination handling: default naming comes from the core;
+    // --force deletes an existing explicit target up front (mirrors encrypt).
+    let dest: Option<PathBuf> = output_str.as_ref().map(PathBuf::from);
+    if let Some(dest) = &dest {
+        if dest.exists() && cli.force {
+            if let Err(e) = fs::remove_file(dest) {
+                let msg = format!("Cannot remove existing output file: {e}");
+                emit_error_json(cli.json, &start, None, &msg);
+                eprintln!("Error: {msg}");
+                return Err(ExitCode::RuntimeError);
+            }
+        }
+    }
+
+    let source_size = fs::metadata(&input_path).ok().map(|m| m.len());
+    let show_progress = !cli.no_progress && !cli.quiet && !cli.json;
+    let reporter = setup_reporter(show_progress, source_size);
+
+    let result = metadata::scrub_file(
+        &input_path,
+        dest.as_deref(),
+        mode,
+        wipe_original,
+        reporter.as_ref(),
+        None,
+    );
+
+    match result {
+        Ok(report) => {
+            let elapsed = start.elapsed().as_millis();
+            let out_display = if in_place {
+                input_path.clone()
+            } else {
+                dest.clone().unwrap_or_else(|| {
+                    input_path
+                        .parent()
+                        .unwrap_or(Path::new("."))
+                        .join(metadata::default_scrub_output_name(&input_path))
+                })
+            };
+            let removed_names = report.format.name().to_string();
+
+            if cli.json {
+                emit_json(&JsonResult {
+                    status: "success".into(),
+                    operation: Some("scrub".into()),
+                    output_path: Some(out_display.display().to_string()),
+                    bytes_processed: Some(report.bytes_before),
+                    duration_ms: elapsed,
+                    sha256: None,
+                    format: Some(removed_names),
+                    removed: Some(report.removed.clone()),
+                    error: None,
+                });
+            } else if !cli.quiet {
+                if report.removed.is_empty() {
+                    eprintln!(
+                        "\u{2713} No removable metadata found in {} ({})",
+                        input_path.display(),
+                        report.format.name()
+                    );
+                } else {
+                    eprintln!(
+                        "\u{2713} Removed {} kind(s) of metadata from {}:",
+                        report.removed.len(),
+                        input_path.display()
+                    );
+                    for item in &report.removed {
+                        eprintln!("    - {item}");
+                    }
+                    eprintln!(
+                        "  Output: {} ({} \u{2192} {} bytes)",
+                        out_display.display(),
+                        HumanBytes(report.bytes_before),
+                        HumanBytes(report.bytes_after)
+                    );
+                }
+                eprintln!("\u{2713} Complete ({:.2}s)", elapsed as f64 / 1000.0);
+            }
+            Ok(())
+        }
+        Err(CryptoError::UnsupportedMediaFormat(reason)) => {
+            let msg = format!("Unsupported format \u{2014} {reason}. File left unmodified.");
+            emit_error_json(cli.json, &start, None, &msg);
+            if !cli.json {
+                eprintln!("\u{2717} {msg}");
+            }
+            Err(ExitCode::BadInput)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            emit_error_json(cli.json, &start, None, &msg);
+            if !cli.json {
+                eprintln!("\u{2717} {msg}");
+            }
+            Err(ExitCode::RuntimeError)
+        }
+    }
+}
+
 fn run() -> Result<(), ExitCode> {
     let cli = Cli::parse();
 
@@ -740,9 +959,21 @@ fn run() -> Result<(), ExitCode> {
     }
 
     let start = Instant::now();
+
+    if let Command::Scrub {
+        input,
+        output,
+        in_place,
+        wipe_original,
+    } = &cli.command
+    {
+        return run_scrub(&cli, start, input, output, *in_place, *wipe_original);
+    }
+
     let (input_str, output_str, mode) = match &cli.command {
         Command::Encrypt { input, output, .. } => (input.clone(), output.clone(), "encrypt"),
         Command::Decrypt { input, output } => (input.clone(), output.clone(), "decrypt"),
+        Command::Scrub { .. } => unreachable!("handled above"),
     };
     let password = match &cli.command {
         Command::Encrypt { no_confirm, .. }
@@ -781,9 +1012,25 @@ fn run() -> Result<(), ExitCode> {
     let is_pipe_out = output_str.as_deref() == Some("-");
 
     if !is_pipe_in && !is_pipe_out {
-        run_file(&cli, start, password.as_slice(), mode, &input_str, &output_str)
+        run_file(
+            &cli,
+            start,
+            password.as_slice(),
+            mode,
+            &input_str,
+            &output_str,
+        )
     } else {
-        run_stream(&cli, start, password.as_slice(), mode, &input_str, &output_str, is_pipe_in, is_pipe_out)
+        run_stream(
+            &cli,
+            start,
+            password.as_slice(),
+            mode,
+            &input_str,
+            &output_str,
+            is_pipe_in,
+            is_pipe_out,
+        )
     }
 }
 

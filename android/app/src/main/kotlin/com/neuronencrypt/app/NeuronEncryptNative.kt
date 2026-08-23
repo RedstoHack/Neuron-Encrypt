@@ -24,4 +24,12 @@ object NeuronEncryptNative {
         progressListener: ProgressListener,
         cancelFlag: java.util.concurrent.atomic.AtomicBoolean
     ): Int
+
+    external fun nativeScrub(
+        inputFd: Int,
+        outputFd: Int,
+        cacheDir: String,
+        progressListener: ProgressListener,
+        cancelFlag: java.util.concurrent.atomic.AtomicBoolean
+    ): Int
 }

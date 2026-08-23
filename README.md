@@ -6,7 +6,7 @@
 
 AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
-[![Version](https://img.shields.io/badge/version-2.1.2-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
+[![Version](https://img.shields.io/badge/version-2.2.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![crates.io](https://img.shields.io/crates/v/neuron-encrypt?style=flat-square&logo=rust&label=crates.io)](https://crates.io/crates/neuron-encrypt)
@@ -43,6 +43,16 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 - **🌍 4 platforms** — Windows, macOS, Linux, Android 7.0+ (all from one Rust codebase)
 - **🔇 Offline-first** — Zero network permissions on Android, zero telemetry, zero tracking
 - **📦 Atomic writes** — Output goes to `.tmp` first, then renames. No partial files on crash
+- **🧽 Metadata scrubbing** — Remove EXIF/GPS, XMP, IPTC, ID3 and document properties from JPEG, PNG, WebP, GIF, TIFF, BMP, PDF, Office, MP3, FLAC, OGG, WAV and MP4 files
+
+---
+
+## What's new in 2.2.0
+
+- **New: metadata scrubbing on every platform** — strip EXIF/GPS, XMP, IPTC, ID3 tags and document properties from photos, PDFs, office documents and audio/video files. One Rust engine powers the GUI (new **Scrub** mode), the CLI (`neuron-encrypt-cli scrub`), and the Android app (new **Scrub** tab, single-file and batch).
+- **Cleaned copies, never surprises** — output is written atomically as `photo.clean.jpg` beside your original; the source is never modified unless you explicitly ask for in-place replacement. Unsupported formats are rejected loudly instead of being copied silently.
+- **Flat memory profile** — the Android engine stages files through app-private cache storage with a fixed 1 MiB buffer (never loads whole files into RAM), guarded by a free-space check before it starts.
+- **Fixed**: an Android bug where cancelling during a chunk write could hang the worker (latent since 2.1.2), and an fd-leak edge case when the destination picker throws.
 
 ---
 
@@ -119,6 +129,27 @@ Your passphrase is held in memory only long enough to derive the key via Argon2i
 
 ---
 
+## Metadata scrubbing (new in 2.2.0)
+
+Scrubbing removes the metadata that leaks who/where/when — without touching your file's contents.
+
+| Family | Formats | What gets removed |
+|--------|---------|-------------------|
+| Images | JPEG, PNG, WebP, GIF, TIFF, BMP | EXIF + GPS, XMP, IPTC, Photoshop blocks, ICC profiles, comments, timestamps |
+| Documents | PDF, Office (`docx`/`xlsx`/`pptx`) | Author/title/dates Info dictionary, XMP streams, `docProps/*`, embedded thumbnails |
+| Audio | MP3, FLAC, OGG, WAV | ID3v1/v2, APE tags, Vorbis comments, RIFF INFO |
+| Video | MP4/MOV | iTunes/`ilst` atoms |
+
+Guarantees:
+
+- **Cleaned copy by default** — `<name>.clean.<ext>` is written atomically beside your file; the original is untouched. In-place replacement and post-copy secure wipe are opt-in.
+- **Fail closed** — unrecognized formats return an explicit error. A scrubber that can't understand a structure aborts rather than emitting a possibly-broken file; every output is re-validated before it replaces anything.
+- **Payload integrity** — kept chunks/segments are copied byte-for-byte, so decoders see identical image/audio data. Tests verify pixels survive TIFF relocation and CRCs stay valid.
+- **Bounded memory on mobile** — the Android engine stages files through app-private cache storage with a fixed 1 MiB buffer; peak RAM does not grow with file size.
+- **Not for HEIC yet** — HEIF/HEIC files are detected but rejected with guidance rather than riskily rewritten.
+
+---
+
 ## Security
 
 ### Cipher suite
@@ -190,6 +221,12 @@ neuron-encrypt-cli encrypt -i backup.tar.gz -o - | ssh user@host 'cat > backup.v
 
 # JSON output for CI/CD
 neuron-encrypt-cli encrypt -i artifact.zip --json --password-file /secrets/key
+
+# Strip metadata (writes photo.clean.jpg beside the original)
+neuron-encrypt-cli scrub -i photo.jpg
+
+# Scrub in place instead, with machine-readable output
+neuron-encrypt-cli scrub -i video.mp4 --in-place --json
 ```
 
 ### Android
@@ -266,9 +303,9 @@ Yes — `neuron-encrypt-cli` ships with the desktop build. Supports piping, JSON
 <details>
 <summary><b>What are the CLI limitations?</b></summary>
 
-- **No stdin encrypt** — encryption requires seeking, so piped input decrypt-only for now
+- **No stdin encrypt / scrub** — both require seeking, so piped input is decrypt-only for now
 - **Argon2id params are fixed** — no `--memory-cost` / `--time-cost` flags (set by design)
-- **No batch/glob mode** — single-file only; use `find -exec` or a loop for batch
+- **No batch/glob mode** — single-file only; use `find -exec` or a loop for batch (the GUI and Android app support batch scrubbing)
 - **No `--dry-run`** — no preview without processing
 - **No password generation flag** — use a password manager
 </details>
@@ -281,8 +318,9 @@ Yes — `neuron-encrypt-cli` ships with the desktop build. Supports piping, JSON
 
 ```
 Neuron-Encrypt/
-├── neuron-encrypt/          # Rust core (crypto + GUI + CLI)
+├── neuron-encrypt/          # Rust core (crypto + metadata + GUI + CLI)
 │   ├── src/crypto.rs        # AES-256-GCM-SIV, Argon2id, V2/V3/V4 formats
+│   ├── src/metadata/        # Metadata scrubbing (EXIF/GPS/XMP/ID3/docProps)
 │   ├── src/gui.rs           # egui desktop GUI
 │   ├── src/bin/cli.rs       # CLI binary
 │   └── Cargo.toml

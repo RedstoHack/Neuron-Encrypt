@@ -5,6 +5,30 @@ All notable changes to Neuron Encrypt are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] — 2026-08-23
+
+### Added
+- **Metadata scrubbing** (new `metadata` module in the core crate, default-on; the JNI crate opts in via feature flag): remove privacy-relevant metadata from files on every platform from one Rust codebase.
+  - **Dedicated scrubbers**: JPEG (APP1 Exif/XMP, APP13 IPTC, COM comments, ICC profiles), PNG (tEXt/zTXt/iTXt/eXIf/tIME chunks; kept chunks copied verbatim so no CRC recomputation), WebP (EXIF/XMP RIFF chunks with size fixup and pad-byte handling), GIF (comment/application/plain-text extensions), TIFF (whitelist-based IFD rebuild with strip/tile relocation and offset patching; BigTIFF rejected loudly), BMP (validated no-op), PDF (`lopdf`: trailer `/Info` + catalog `/Metadata` XMP stream, orphan pruning), Office OOXML (`zip`: `docProps/core.xml`/`app.xml`/`custom.xml`/thumbnails plus `[Content_Types].xml` Override and `_rels/.rels` Relationship surgery so packages stay valid), MP3 / FLAC / OGG / WAV / MP4-MOV (`lofty`: ID3v1/v2, APE, Vorbis comments, RIFF INFO, iTunes ilst with chunk-offset patching — tags are replaced with empty ones because lofty's save is a no-op when no tags are registered).
+  - **Fail-closed detection**: magic-byte sniffing rejects unknown formats, plain zips, VAULTX encrypted files and BigTIFF with an explicit "unsupported" error instead of a silent copy. HEIC/HEIF is detected but rejected until structural scrubbing lands.
+  - **Non-destructive by default**: cleaned output is written atomically as `<name>.clean.<ext>` beside the source through the same tmp+hard-link/rename machinery as encryption (unix mode 0600). Post-write validation re-sniffs the output before persisting; every error/cancel path removes scratch files. Optional in-place replacement and post-copy secure wipe.
+- **CLI `scrub` subcommand**: `scrub -i <file> [-o <out>] [--in-place] [--wipe-original] [--json] [-F]`. JSON gains `operation`, `format`, `removed` fields (encrypt/decrypt schema unchanged). Exit codes: 0 success, 1 failure, 2 unsupported format. Piped stdin rejected (scrubbing requires seeking).
+- **Desktop GUI**: new Encrypt / Decrypt / Scrub operation switcher; passphrase UI hidden while scrubbing; success screen summarises removed categories. Batch screen gains "Scrub metadata only (no passphrase)" checkbox with per-file format/removal summaries.
+- **Android**: new `nativeScrub` JNI export using **staged streaming** — the input descriptor is copied through a fixed 1 MiB buffer into the app-private cache dir, the path-based core scrubber runs there (audio/video containers stream via lofty internally), and the result streams back to the output descriptor. Peak memory stays flat regardless of file size; temporary disk use (~2x source) is guarded by a statvfs free-space check; temps are deleted on every exit path. A watcher thread bridges the Java cancellation flag into the core's chunk-boundary checks, and progress phases are rescaled to stay monotonic. Single-file screen gains a Scrub tab (passphrase fields hidden); batch screen gains the same tab with per-file unsupported-format skip messaging.
+
+### Fixed
+- **Android mid-chunk cancel busy-loop** (latent since v2.1.2): `CancelableReader` returned `ErrorKind::Interrupted` on cancellation, which std-style read loops treat as "retry" — cancelling during a 1 MiB chunk read could spin forever. It now returns a distinct error that `map_error` still classifies as cancellation.
+- **Android fd leak edge case**: if the second `openFileDescriptor` threw after the first succeeded, the first fd leaked. All three operations nest try/finally so both descriptors close on every path.
+
+### Changed
+- **Version bump** 2.1.2 → 2.2.0 (core + JNI crates, Android versionName), Android versionCode 5 → 6.
+- New dependencies behind the `metadata` feature: `lopdf`, `zip` (deflate only), `lofty`; `kamadak-exif` as test-only dev-dependency for independent EXIF verification. `deny.toml` now lives at the crate root where `cargo deny check` resolves it.
+
+### Test Results
+- `cargo test --lib --release`: **63/63 pass** (38 crypto + 25 metadata tests).
+- Metadata coverage: programmatic round-trip fixtures for JPEG/PNG/WebP/GIF/TIFF/BMP/PDF/OOXML/MP3/WAV/FLAC; detection matrix incl. BigTIFF/HEIC/plain-zip negatives; orchestration tests (default naming, dest conflicts, unsupported rejection without output, truncated-input fail-closed with tmp cleanup, cancel no-op, in-place replace, wipe-original, idempotence across five formats); TIFF rebuild verified pixel-exact with an independent minimal reader.
+- `cargo clippy -D warnings` clean (core all-targets all-features + JNI crate); `cargo fmt --check` clean.
+
 ## [2.1.2] — 2026-08-10
 
 ### Fixed

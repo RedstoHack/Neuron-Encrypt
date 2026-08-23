@@ -1,6 +1,6 @@
 [package]
 name = "neuron-encrypt-jni"
-version = "2.1.2"
+version = "2.2.0"
 edition = "2021"
 
 [lib]
@@ -8,7 +8,7 @@ name = "neuron_encrypt_jni"
 crate-type = ["cdylib"]
 
 [dependencies]
-neuron-encrypt = { path = "../../neuron-encrypt", default-features = false }
+neuron-encrypt = { path = "../../neuron-encrypt", default-features = false, features = ["metadata"] }
 jni = { version = "0.21", default-features = false }
 libc = "0.2"
 zeroize = "1.8"

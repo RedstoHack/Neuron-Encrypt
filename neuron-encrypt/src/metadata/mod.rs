@@ -17,9 +17,9 @@
 
 pub mod documents;
 pub mod images;
+pub mod media;
 #[cfg(test)]
 pub(crate) mod tests;
-pub mod media;
 
 use std::fs;
 use std::io::Write;
@@ -176,13 +176,13 @@ pub fn detect_media_format(header: &[u8]) -> Option<MediaFormat> {
     if &header[4..8] == b"ftyp" {
         let brand = &header[8..12];
         const MP4_BRANDS: [&[u8; 4]; 10] = [
-            b"isom", b"iso2", b"mp41", b"mp42", b"avc1", b"M4A ", b"M4V ", b"qt  ", b"dash", b"MSNV",
+            b"isom", b"iso2", b"mp41", b"mp42", b"avc1", b"M4A ", b"M4V ", b"qt  ", b"dash",
+            b"MSNV",
         ];
         if MP4_BRANDS.iter().any(|b| *b == brand) {
             return Some(MediaFormat::Mp4);
         }
-        const HEIF_BRANDS: [&[u8; 4]; 6] =
-            [b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1"];
+        const HEIF_BRANDS: [&[u8; 4]; 6] = [b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1"];
         if HEIF_BRANDS.iter().any(|b| *b == brand) {
             return Some(MediaFormat::Heif);
         }
@@ -253,10 +253,7 @@ fn open_scratch_file(tmp: &Path) -> CryptoResult<fs::File> {
     }
 }
 
-fn validate_scrub_output(
-    tmp: &Path,
-    format: MediaFormat,
-) -> CryptoResult<()> {
+fn validate_scrub_output(tmp: &Path, format: MediaFormat) -> CryptoResult<()> {
     let header = read_header(tmp)?;
     let redetected = detect_media_format(&header);
     if redetected != Some(format) {
@@ -324,7 +321,10 @@ pub fn scrub_file(
         ScrubOutput::InPlace => src.to_path_buf(),
     };
 
-    reporter.report(0.05, &format!("Detected {} — removing metadata...", format.name()));
+    reporter.report(
+        0.05,
+        &format!("Detected {} — removing metadata...", format.name()),
+    );
 
     let tmp = tmp_path(&dest);
     let write_result = (|| -> CryptoResult<Vec<String>> {
@@ -345,7 +345,10 @@ pub fn scrub_file(
                 out.write_all(&read_all_capped(src, source_len)?)?;
                 Vec::new()
             }
-            MediaFormat::Jpeg | MediaFormat::Png | MediaFormat::WebP | MediaFormat::Gif
+            MediaFormat::Jpeg
+            | MediaFormat::Png
+            | MediaFormat::WebP
+            | MediaFormat::Gif
             | MediaFormat::Tiff => {
                 let data = read_all_capped(src, source_len)?;
                 let (cleaned, removed) = images::scrub_image(format, &data)?;
@@ -358,7 +361,10 @@ pub fn scrub_file(
                 out.write_all(&cleaned)?;
                 removed
             }
-            MediaFormat::Mp3 | MediaFormat::Flac | MediaFormat::Ogg | MediaFormat::Wav
+            MediaFormat::Mp3
+            | MediaFormat::Flac
+            | MediaFormat::Ogg
+            | MediaFormat::Wav
             | MediaFormat::Mp4 => {
                 drop(out);
                 media::scrub_media_file(src, &tmp)?
