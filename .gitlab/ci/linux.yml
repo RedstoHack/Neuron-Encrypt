@@ -17,6 +17,7 @@ build-linux:
     - apt-get update && apt-get install -y --no-install-recommends clang lld pkg-config libssl-dev build-essential
   script:
     - echo "Building for Linux x86_64..."
+    - cd neuron-encrypt
     - cargo build --release --locked --bin neuron-encrypt --bin neuron-encrypt-cli
     - cargo test --release --locked --lib
   artifacts:

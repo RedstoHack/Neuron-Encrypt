@@ -16,9 +16,10 @@ build-windows:
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends clang lld pkg-config libssl-dev build-essential mingw-w64
     - rustup target add x86_64-pc-windows-gnu
-    - mkdir -p .cargo && printf '[target.x86_64-pc-windows-gnu]\nlinker = "x86_64-w64-mingw32-gcc"\nar = "x86_64-w64-mingw32-gcc-ar"\n' > .cargo/config.toml
+    - mkdir -p neuron-encrypt/.cargo && printf '[target.x86_64-pc-windows-gnu]\nlinker = "x86_64-w64-mingw32-gcc"\nar = "x86_64-w64-mingw32-gcc-ar"\n' > neuron-encrypt/.cargo/config.toml
   script:
     - echo "Building for Windows x86_64..."
+    - cd neuron-encrypt
     - cargo build --release --locked --target x86_64-pc-windows-gnu --bin neuron-encrypt --bin neuron-encrypt-cli
   artifacts:
     paths:
