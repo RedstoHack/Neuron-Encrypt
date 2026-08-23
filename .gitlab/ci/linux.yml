@@ -1,0 +1,46 @@
+# Linux pipeline — standalone child pipeline
+# Triggered from parent .gitlab-ci.yml (job "linux")
+
+stages:
+  - build
+  - package
+
+variables:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: "always"
+  CARGO_INCREMENTAL: "0"
+
+build-linux:
+  stage: build
+  image: rust:1.88-slim
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends clang lld pkg-config libssl-dev build-essential
+  script:
+    - echo "Building for Linux x86_64..."
+    - cargo build --release --locked --bin neuron-encrypt --bin neuron-encrypt-cli
+    - cargo test --release --locked --lib
+  artifacts:
+    paths:
+      - neuron-encrypt/target/release/neuron-encrypt
+      - neuron-encrypt/target/release/neuron-encrypt-cli
+    expire_in: 30 days
+
+package-linux:
+  stage: package
+  needs: [build-linux]
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache tar
+  script:
+    - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
+    - mkdir -p release/neuron-encrypt-$VERSION-linux-x86_64
+    - cp neuron-encrypt/target/release/neuron-encrypt release/neuron-encrypt-$VERSION-linux-x86_64/
+    - cp neuron-encrypt/target/release/neuron-encrypt-cli release/neuron-encrypt-$VERSION-linux-x86_64/
+    - tar -czf neuron-encrypt-$VERSION-linux-x86_64.tar.gz -C release neuron-encrypt-$VERSION-linux-x86_64
+    - sha256sum neuron-encrypt-$VERSION-linux-x86_64.tar.gz > SHA256SUMS-linux.txt
+    - cat SHA256SUMS-linux.txt
+  artifacts:
+    paths:
+      - neuron-encrypt-*-linux-x86_64.tar.gz
+      - SHA256SUMS-linux.txt
+    expire_in: 30 days

@@ -1,359 +1,51 @@
-# GitLab CI/CD Pipeline for Neuron Encrypt
-# Builds: Linux, Windows, macOS, Android
+# Neuron Encrypt — Parent pipeline
+# Each OS has its own standalone child pipeline under .gitlab/ci/
+# Run from GitLab UI: CI/CD > Pipelines > Run pipeline,
+# then click the individual "trigger" play buttons below.
 
 stages:
-  - quality
-  - build-linux
-  - build-windows
-  - build-macos
-  - build-android
-  - package
-  - release
+  - build
 
-variables:
-  # Rust configuration
-  RUST_BACKTRACE: "1"
-  CARGO_TERM_COLOR: "always"
-  CARGO_INCREMENTAL: "0"
-  RUSTFLAGS: "-C target-cpu=native"
-
-  # Android
-  ANDROID_SDK_ROOT: "/opt/android-sdk"
-  ANDROID_HOME: "/opt/android-sdk"
-  ANDROID_NDK_HOME: "/opt/android-sdk/ndk/26.1.10909125"
-  ANDROID_NDK_ROOT: "/opt/android-sdk/ndk/26.1.10909125"
-
-  # Cross-compilation
-  CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: "x86_64-w64-mingw32-gcc"
-  CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER: "x86_64-apple-darwin23.0-clang"
-
-  # Artifacts
-  ARTIFACT_EXPIRY: "30 day"
-
-# Default image for Linux builds
-default:
-  image: rust:1.88-slim
-  before_script:
-    - apt-get update && apt-get install -y --no-install-recommends
-        clang
-        lld
-        ca-certificates
-        curl
-        file
-        git
-        pkg-config
-        libssl-dev
-        build-essential
-        cmake
-        ninja-build
-    - rustup component add rustfmt clippy
-    - rustup target add x86_64-unknown-linux-gnu
-    - rustup target add x86_64-pc-windows-gnu
-    - rustup target add x86_64-apple-darwin
-    - cargo install cargo-ndk --locked --version 4.1.2 || true
-
-# =============================================================================
-# QUALITY CHECKS
-# =============================================================================
-quality-checks:
-  stage: prepare
-  needs: []
-  script:
-    - echo "Running code quality checks..."
-    - cargo fmt --all -- --check
-    - cargo clippy --all-targets --all-features -- -D warnings
-    - cargo audit --deny warnings || echo "Audit warnings found, review manually"
-    - cargo deny check || echo "Deny checks failed, review manually"
-  artifacts:
-    reports:
-      sast: gl-sast-report.json
-    expire_in: "1 hour"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-
-# =============================================================================
-# SECURITY AUDIT
-# =============================================================================
-security-audit:
-  stage: prepare
-  needs: []
-  script:
-    - cargo install cargo-audit --locked
-    - cargo audit --deny warnings
-    - cargo install cargo-deny --locked
-    - cargo deny check
-  artifacts:
-    reports:
-      sast: gl-sast-report.json
-    expire_in: "1 hour"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-  allow_failure: true
-
-# =============================================================================
-# LINUX BUILD (native) - WORKS
-# =============================================================================
-build-linux:
-  stage: build-linux
-  needs: [prepare]
-  script:
-    - echo "Building for Linux (x86_64-unknown-linux-gnu)..."
-    - cargo build --release --locked --all-targets
-    - cargo test --release --locked --lib
-  artifacts:
-    paths:
-      - neuron-encrypt/target/release/neuron-encrypt
-      - neuron-encrypt/target/release/neuron-encrypt-cli
-    expire_in: "30 day"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "pipeline" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "schedule"
-
-# =============================================================================
-# WINDOWS BUILD (cross-compilation from Linux) - WORKS
-# =============================================================================
-build-windows:
-  stage: build-windows
-  needs: [prepare]
-  variables:
-    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER: "wine64"
-  before_script:
-    - apt-get update && apt-get install -y --no-install-recommends
-        mingw-w64
-        wine64
-    - rustup target add x86_64-pc-windows-gnu
-  script:
-    - echo "Building for Windows (x86_64-pc-windows-gnu)..."
-    - cargo build --release --locked --target x86_64-pc-windows-gnu
-  artifacts:
-    paths:
-      - neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt.exe
-      - neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt-cli.exe
-    expire_in: "30 day"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "pipeline" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "schedule"
-
-# =============================================================================
-# MACOS BUILD - NEEDS macOS RUNNER (not available on GitLab.com shared)
-# =============================================================================
-build-macos:
-  stage: build-macos
-  needs: [prepare]
-  tags:
-    - macos  # Requires self-hosted macOS runner
-  variables:
-    MACOSX_DEPLOYMENT_TARGET: "10.15"
-  before_script:
-    - apt-get update && apt-get install -y --no-install-recommends
-        clang
-        lld
-        libxml2-dev
-    - rustup target add x86_64-apple-darwin
-    - |
-      if [ ! -d "/opt/macos-sdk" ]; then
-        mkdir -p /opt/macos-sdk
-        cd /opt/macos-sdk
-        curl -L -o MacOSX13.3.sdk.tar.xz https://github.com/phracker/MacOSX-SDKs/releases/download/13.3/MacOSX13.3.sdk.tar.xz
-        tar -xf MacOSX13.3.sdk.tar.xz
-        rm MacOSX13.3.sdk.tar.xz
-      fi
-    - export SDKROOT=/opt/macos-sdk/MacOSX13.3.sdk
-  script:
-    - echo "Building for macOS (x86_64-apple-darwin)..."
-    - cargo build --release --locked --target x86_64-apple-darwin
-  artifacts:
-    paths:
-      - neuron-encrypt/target/x86_64-apple-darwin/release/neuron-encrypt
-      - neuron-encrypt/target/x86_64-apple-darwin/release/neuron-encrypt-cli
-    expire_in: "30 day"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "schedule"
-  allow_failure: true  # Won't fail pipeline if no macOS runner
-
-# =============================================================================
-# ANDROID BUILD - NEEDS ANDROID SDK/NDK PRE-INSTALLED OR SSL FIX
-# =============================================================================
-build-android:
-  stage: build-android
-  needs: [prepare]
-  image: ubuntu:22.04
-  tags:
-    - android  # Requires self-hosted runner with Android SDK/NDK pre-installed
-  before_script:
-    - apt-get update && apt-get install -y --no-install-recommends
-        openjdk-17-jdk-headless
-        gradle
-        unzip
-        wget
-        curl
-        ca-certificates
-    - export ANDROID_SDK_ROOT=/opt/android-sdk
-    - export ANDROID_HOME=/opt/android-sdk
-    - export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-    - |
-      if [ ! -d "$ANDROID_SDK_ROOT" ]; then
-        mkdir -p $ANDROID_SDK_ROOT
-        cd $ANDROID_SDK_ROOT
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
-        unzip -q cmdtools.zip -d cmdline-tools
-        mv cmdline-tools latest
-        rm cmdtools.zip
-      fi
-    - yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses
-    - $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-34" "build-tools;34.0.0" "platform-tools" "ndk;26.1.10909125"
-    - export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125
-    - export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125
-    - export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
-    - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-    - cargo install cargo-ndk --locked --version 4.1.2
-  script:
-    - cd android
-    - chmod +x build-rust.sh
-    - ./build-rust.sh
-    - export ANDROID_SDK_ROOT=/opt/android-sdk
-    - export ANDROID_HOME=/opt/android-sdk
-    - export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-    - export PATH="/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH"
-    - ./gradlew :app:assembleStandardDebug --no-daemon
-  artifacts:
-    paths:
-      - android/app/build/outputs/apk/standard/debug/app-standard-debug.apk
-    expire_in: "30 day"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "schedule"
-  allow_failure: true  # Won't fail pipeline if no Android runner
-
-# =============================================================================
-# PACKAGE STAGE - Create release archives
-# =============================================================================
-package:
-  stage: package
-  needs:
-    - build-linux
-    - build-windows
-    - build-macos
-    - build-android
-  image: alpine:3.20
-  script:
-    - apk add --no-cache zip tar
-    - mkdir -p release
-    - VERSION=$(grep '^version =' neuron-encrypt/Cargo.toml | cut -d'"' -f2)
-    - echo "Packaging version $VERSION..."
-    # Linux
-    - mkdir -p release/neuron-encrypt-$VERSION-linux-x86_64
-    - cp neuron-encrypt/target/release/neuron-encrypt release/neuron-encrypt-$VERSION-linux-x86_64/
-    - cp neuron-encrypt/target/release/neuron-encrypt-cli release/neuron-encrypt-$VERSION-linux-x86_64/
-    - tar -czf release/neuron-encrypt-$VERSION-linux-x86_64.tar.gz -C release neuron-encrypt-$VERSION-linux-x86_64
-    # Windows
-    - mkdir -p release/neuron-encrypt-$VERSION-windows-x86_64
-    - cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt.exe release/neuron-encrypt-$VERSION-windows-x86_64/
-    - cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt-cli.exe release/neuron-encrypt-$VERSION-windows-x86_64/
-    - zip -r release/neuron-encrypt-$VERSION-windows-x86_64.zip release/neuron-encrypt-$VERSION-windows-x86_64
-    # macOS
-    - mkdir -p release/neuron-encrypt-$VERSION-macos-x86_64
-    - cp neuron-encrypt/target/x86_64-apple-darwin/release/neuron-encrypt release/neuron-encrypt-$VERSION-macos-x86_64/ 2>/dev/null || echo "macOS binary not available"
-    - cp neuron-encrypt/target/x86_64-apple-darwin/release/neuron-encrypt-cli release/neuron-encrypt-$VERSION-macos-x86_64/ 2>/dev/null || echo "macOS binary not available"
-    - tar -czf release/neuron-encrypt-$VERSION-macos-x86_64.tar.gz -C release neuron-encrypt-$VERSION-macos-x86_64 2>/dev/null || echo "macOS packaging skipped"
-    # Android
-    - mkdir -p release/neuron-encrypt-$VERSION-android
-    - cp android/app/build/outputs/apk/standard/debug/app-standard-debug.apk release/neuron-encrypt-$VERSION-android/neuron-encrypt-$VERSION.apk 2>/dev/null || echo "Android APK not available"
-    # Checksums
-    - cd release && sha256sum *.tar.gz *.zip *.apk > SHA256SUMS.txt 2>/dev/null || true
-    - cat SHA256SUMS.txt
-  artifacts:
-    paths:
-      - release/*.tar.gz
-      - release/*.zip
-      - release/*.apk
-      - release/SHA256SUMS.txt
-    expire_in: "30 day"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "schedule"
-
-# =============================================================================
-# MANUAL RELEASE DEPLOYMENT (triggered manually)
-# =============================================================================
-release:
-  stage: release
-  needs: [package]
+# ---------------------------------------------------------------------------
+# Linux — child pipeline: .gitlab/ci/linux.yml
+# ---------------------------------------------------------------------------
+linux:
+  stage: build
   when: manual
-  image: alpine:3.20
-  script:
-    - apk add --no-cache curl jq
-    - VERSION=$(grep '^version =' neuron-encrypt/Cargo.toml | cut -d'"' -f2)
-    - echo "Creating GitLab release for version $VERSION..."
-    - |
-      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-        --header "Content-Type: application/json" \
-        --data "{
-          \"name\": \"v$VERSION\",
-          \"tag_name\": \"v$VERSION\",
-          \"description\": \"Release v$VERSION\\n\\nSee CHANGELOG.md for details.\",
-          \"ref\": \"$CI_COMMIT_SHA\",
-          \"assets\": {
-            \"links\": [
-              {\"name\": \"Linux x86_64\", \"url\": \"$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_SHA/raw/release/neuron-encrypt-$VERSION-linux-x86_64.tar.gz?job=package\"},
-              {\"name\": \"Windows x86_64\", \"url\": \"$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_SHA/raw/release/neuron-encrypt-$VERSION-windows-x86_64.zip?job=package\"},
-              {\"name\": \"macOS x86_64\", \"url\": \"$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_SHA/raw/release/neuron-encrypt-$VERSION-macos-x86_64.tar.gz?job=package\"},
-              {\"name\": \"Android APK\", \"url\": \"$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_SHA/raw/release/neuron-encrypt-$VERSION-android/neuron-encrypt-$VERSION.apk?job=package\"}
-            ]
-          }" \
-        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
-    - echo "Release created successfully!"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "schedule"
-      when: manual
-  only:
-    - tags
+  trigger:
+    include: .gitlab/ci/linux.yml
+    strategy: depend
 
-# =============================================================================
-# CACHE CONFIGURATION
-# =============================================================================
-cache:
-  key: "${CI_COMMIT_REF_SLUG}"
-  paths:
-    - .cargo/registry/
-    - .cargo/git/
-    - target/
-    - neuron-encrypt/target/
-    - android/app/build/
-    - android/.gradle/
-  policy: pull-push
+# ---------------------------------------------------------------------------
+# Windows — child pipeline: .gitlab/ci/windows.yml
+# ---------------------------------------------------------------------------
+windows:
+  stage: build
+  when: manual
+  trigger:
+    include: .gitlab/ci/windows.yml
+    strategy: depend
 
-# =============================================================================
-# MERGE REQUEST PIPELINE
-# =============================================================================
-mr-pipeline:
-  stage: prepare
-  needs: []
-  script:
-    - echo "Running MR pipeline checks..."
-    - cargo check --all-targets --all-features
-    - cargo test --locked --lib
-    - cargo fmt --all -- --check
-    - cargo clippy --all-targets --all-features -- -D warnings
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-  allow_failure: false
+# ---------------------------------------------------------------------------
+# macOS — child pipeline: .gitlab/ci/macos.yml
+# Requires a self-hosted runner registered with tag "macos"
+# ---------------------------------------------------------------------------
+macos:
+  stage: build
+  when: manual
+  allow_failure: true
+  trigger:
+    include: .gitlab/ci/macos.yml
+    strategy: depend
 
-
-# =============================================================================
-# PREPARE STAGE
-# =============================================================================
-prepare:
-  stage: prepare
-  needs: []
-  script:
-    - echo "Preparing build environment..."
-    - cargo fetch --locked
-    - cargo generate-lockfile
-  artifacts:
-    paths:
-      - Cargo.lock
-    expire_in: "1 hour"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "merge_request_event"
-
+# ---------------------------------------------------------------------------
+# Android — child pipeline: .gitlab/ci/android.yml
+# Requires a runner with Android SDK/NDK (tag "android") or working network
+# ---------------------------------------------------------------------------
+android:
+  stage: build
+  when: manual
+  allow_failure: true
+  trigger:
+    include: .gitlab/ci/android.yml
+    strategy: depend

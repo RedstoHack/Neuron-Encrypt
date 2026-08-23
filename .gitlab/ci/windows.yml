@@ -1,0 +1,47 @@
+# Windows pipeline — standalone child pipeline (cross-compiled from Linux)
+# Triggered from parent .gitlab-ci.yml (job "windows")
+
+stages:
+  - build
+  - package
+
+variables:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: "always"
+  CARGO_INCREMENTAL: "0"
+
+build-windows:
+  stage: build
+  image: rust:1.88-slim
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends clang lld pkg-config libssl-dev build-essential mingw-w64
+    - rustup target add x86_64-pc-windows-gnu
+    - mkdir -p .cargo && printf '[target.x86_64-pc-windows-gnu]\nlinker = "x86_64-w64-mingw32-gcc"\nar = "x86_64-w64-mingw32-gcc-ar"\n' > .cargo/config.toml
+  script:
+    - echo "Building for Windows x86_64..."
+    - cargo build --release --locked --target x86_64-pc-windows-gnu --bin neuron-encrypt --bin neuron-encrypt-cli
+  artifacts:
+    paths:
+      - neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt.exe
+      - neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt-cli.exe
+    expire_in: 30 days
+
+package-windows:
+  stage: package
+  needs: [build-windows]
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache zip
+  script:
+    - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
+    - mkdir -p release/neuron-encrypt-$VERSION-windows-x86_64
+    - cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt.exe release/neuron-encrypt-$VERSION-windows-x86_64/
+    - cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt-cli.exe release/neuron-encrypt-$VERSION-windows-x86_64/
+    - zip -r neuron-encrypt-$VERSION-windows-x86_64.zip release/neuron-encrypt-$VERSION-windows-x86_64
+    - sha256sum neuron-encrypt-$VERSION-windows-x86_64.zip > SHA256SUMS-windows.txt
+    - cat SHA256SUMS-windows.txt
+  artifacts:
+    paths:
+      - neuron-encrypt-*-windows-x86_64.zip
+      - SHA256SUMS-windows.txt
+    expire_in: 30 days
