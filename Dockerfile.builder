@@ -1,7 +1,7 @@
-# Dockerfile.builder - Builder image for consistent CI builds
+# Dockerfile.builder - Builder image with ALL toolchains for local/CI builds
 FROM rust:1.88-slim AS builder
 
-# Install system dependencies
+# Install ALL system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     lld \
@@ -23,23 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     lld \
     libxml2-dev \
+    libxml2-utils \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Rust targets
-RUN rustup component add rustfmt clippy && \
-    rustup target add \
-    x86_64-unknown-linux-gnu \
-    x86_64-pc-windows-gnu \
-    x86_64-apple-darwin \
-    aarch64-linux-android \
-    armv7-linux-androideabi \
-    x86_64-linux-android \
-    i686-linux-android
-
-# Install cargo tools
-RUN cargo install cargo-ndk --locked --version 4.1.2 && \
-    cargo install cargo-audit --locked && \
-    cargo install cargo-deny --locked
 
 # Install Android SDK
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
@@ -66,14 +51,38 @@ ENV ANDROID_NDK_ROOT=/opt/android-sdk/ndk/26.1.10909125
 # Install cargo-ndk
 RUN cargo install cargo-ndk --locked --version 4.1.2
 
-# Install macOS SDK for cross-compilation
-RUN mkdir -p /opt/macos-sdk && \
-    cd /opt/macos-sdk && \
-    curl -L -o MacOSX13.3.sdk.tar.xz https://github.com/phracker/MacOSX-SDKs/releases/download/13.3/MacOSX13.3.sdk.tar.xz && \
-    tar -xf MacOSX13.3.sdk.tar.xz && \
-    rm MacOSX13.3.sdk.tar.xz
+# Install osxcross for macOS cross-compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xz-utils \
+    python3 \
+    libxml2-utils \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV SDKROOT=/opt/macos-sdk/MacOSX13.3.sdk
+RUN git clone --depth=1 https://github.com/tpoechtrager/osxcross.git /opt/osxcross && \
+    cd /opt/osxcross && \
+    # Download macOS SDK
+    wget -q https://github.com/phracker/MacOSX-SDKs/releases/download/13.3/MacOSX13.3.sdk.tar.xz -O tarballs/MacOSX13.3.sdk.tar.xz && \
+    UNATTENDED=1 ./build.sh && \
+    rm -rf tarballs
+
+ENV PATH="/opt/osxcross/target/bin:$PATH"
+ENV SDKROOT=/opt/osxcross/target/SDK/MacOSX13.3.sdk
+
+# Install Rust targets
+RUN rustup component add rustfmt clippy && \
+    rustup target add \
+    x86_64-unknown-linux-gnu \
+    x86_64-pc-windows-gnu \
+    x86_64-apple-darwin \
+    aarch64-linux-android \
+    armv7-linux-androideabi \
+    x86_64-linux-android \
+    i686-linux-android
+
+# Install cargo tools
+RUN cargo install cargo-ndk --locked --version 4.1.2 && \
+    cargo install cargo-audit --locked && \
+    cargo install cargo-deny --locked
 
 WORKDIR /workspace
 
