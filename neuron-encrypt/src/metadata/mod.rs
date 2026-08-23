@@ -270,18 +270,14 @@ fn validate_scrub_output(
 }
 
 fn persist_scratched(tmp: &Path, dest: &Path) -> CryptoResult<()> {
-    match persist_temp_file(tmp, dest) {
-        Ok(()) => Ok(()),
-        Err(CryptoError::FileAlreadyExists(_)) | Err(CryptoError::Io(ref e))
-            if e.kind() == std::io::ErrorKind::AlreadyExists =>
-        {
-            // Windows rename-over-existing fails; replace deliberately.
-            // This only runs in in-place mode where dest == src.
-            fs::remove_file(dest).map_err(CryptoError::from)?;
-            persist_temp_file(tmp, dest)
-        }
-        Err(other) => Err(other),
+    // Clear any existing destination first (in-place mode where dest == src,
+    // or Windows rename semantics). This must happen before the single
+    // persist attempt because persist_temp_file removes the scratch file on
+    // its own failure paths.
+    if fs::symlink_metadata(dest).is_ok() {
+        fs::remove_file(dest).map_err(CryptoError::from)?;
     }
+    persist_temp_file(tmp, dest)
 }
 
 /// Remove all known metadata from the file at `src`.

@@ -136,7 +136,7 @@ fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
 }
 
 fn png_fixture(with_metadata: bool) -> Vec<u8> {
-    let ihdr: [u8; 13] = [0, 2, 0, 2, 8, 2, 0, 0, 0]; // 2x2 RGB
+    let ihdr: [u8; 13] = [0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 0, 0]; // 2x2 RGB (w,h u32 each)
     let idat = [0xABu8; 12];
 
     let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
@@ -145,7 +145,7 @@ fn png_fixture(with_metadata: bool) -> Vec<u8> {
         out.extend(png_chunk(b"tEXt", b"Comment\x00hide me"));
         out.extend(png_chunk(b"iTXt", b"XML:com.adobe.xmp\x00\x00\x00\x00\x00<x/>"));
         out.extend(png_chunk(b"eXIf", &tiny_exif_tiff()));
-        out.extend(png_chunk(b"tIME", &[2026, 1, 1, 0, 0, 0]));
+        out.extend(png_chunk(b"tIME", &[126, 1, 1, 0, 0, 0]));
         out.extend(png_chunk(b"zTXt", b"key\x00\x00compressed"));
     }
     out.extend(png_chunk(b"IDAT", &idat));
@@ -154,12 +154,22 @@ fn png_fixture(with_metadata: bool) -> Vec<u8> {
 }
 
 fn webp_fixture(with_metadata: bool) -> Vec<u8> {
-    let vp8l = [0x2Bu8, 0x14, 0x00, 0x00, 0x00];
+    // RIFF sub-chunk: fourcc + LITTLE-ENDIAN size + payload (+ pad byte if odd).
+    fn riff_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut c = Vec::with_capacity(data.len() + 8);
+        c.extend_from_slice(kind);
+        c.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        c.extend_from_slice(data);
+        c
+    }
+    let vp8l = [0x2Bu8, 0x14, 0x00, 0x00, 0x00]; // odd length -> pad byte required
     let mut body = Vec::new();
-    body.extend(png_chunk(b"VP8L", &vp8l));
+    body.extend(riff_chunk(b"VP8L", &vp8l));
+    body.push(0x00);
     if with_metadata {
-        body.extend(png_chunk(b"EXIF", &tiny_exif_tiff()));
-        body.extend(png_chunk(b"XMP ", b"<odd>")); // odd length → pad byte
+        body.extend(riff_chunk(b"EXIF", &tiny_exif_tiff()));
+        body.extend(riff_chunk(b"XMP ", b"<odd>")); // odd length
+        body.push(0x00);
     }
 
     let mut out = Vec::new();
@@ -329,7 +339,7 @@ fn flac_fixture() -> Vec<u8> {
 }
 
 fn mp3_fixture() -> Vec<u8> {
-    let frame_data = b"TALB\x00\x00\x00\x0A\x00\x00EVILALBUM!";
+    let frame_data = b"TALB\x00\x00\x00\x0B\x00\x00\x00EVILALBUM!"; // enc-byte + 10 chars
     let syncsafe = |mut s: u32| -> [u8; 4] {
         let mut out = [0u8; 4];
         for b in out.iter_mut().rev() {
@@ -344,8 +354,10 @@ fn mp3_fixture() -> Vec<u8> {
     out.extend_from_slice(&syncsafe(frame_data.len() as u32));
     out.extend_from_slice(frame_data);
 
-    out.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]); // MPEG-1 Layer III frame
-    out.extend_from_slice(&vec![0x00u8; 200]);
+    for _ in 0..2 {
+        out.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
+        out.extend_from_slice(&vec![0x00u8; 413]); // complete the 417-byte frame
+    }
     out
 }
 
@@ -482,7 +494,7 @@ fn scrubs_png_chunks_verbatim_elsewhere() {
         &out[out_idat - 4..out_idat + 16]
     );
     assert!(find(&out, b"IHDR").is_some());
-    assert!(out.ends_with(png_chunk(b"IEND", &[])));
+    assert!(out.ends_with(&png_chunk(b"IEND", &[])));
 
     assert_eq!(removed.len(), 3, "{removed:?}"); // text, exif, time
 }

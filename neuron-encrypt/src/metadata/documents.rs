@@ -1,5 +1,7 @@
 //! Document scrubbers: PDF (lopdf) and Office Open XML (zip).
 
+use zip::result::ZipError;
+
 use super::MediaFormat;
 use crate::error::{CryptoError, CryptoResult};
 
@@ -47,7 +49,7 @@ fn scrub_pdf(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         if let Ok(dict) = doc.get_object(id).and_then(Object::as_dict) {
             let present: Vec<u8> = PDF_INFO_KEYS
                 .iter()
-                .filter(|k| dict.has(k).unwrap_or(false))
+                .filter(|k| dict.has(k))
                 .flat_map(|k| k.iter().copied())
                 .collect();
             if !present.is_empty() {
@@ -68,15 +70,16 @@ fn scrub_pdf(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             .and_then(|d| d.get(b"Metadata").ok())
             .and_then(|o| o.as_reference().ok());
         if let Some(meta_id) = metadata_ref {
+            // delete_object strips every reference to meta_id across the
+            // document graph (including the catalog entry) and drops the
+            // object itself.
             let _ = doc.delete_object(meta_id);
-            if let Ok(Ok(())) = doc
-                .get_object_mut(catalog_id)
-                .map(|obj| obj.as_dict_mut().and_then(|d| d.remove(b"Metadata").map(|_| ())))
-            {
-                removed.push("XMP metadata stream".to_string());
-            }
+            removed.push("XMP metadata stream".to_string());
         }
     }
+
+    // Clean out any objects orphaned by the removals above.
+    let _ = doc.prune_objects();
 
     // Dropping the Info object can orphan private data referenced nowhere
     // else; a full save re-serializes only reachable objects.
@@ -99,7 +102,6 @@ const OOXML_DROP_PARTS: [&str; 4] = [
 
 fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     use std::io::{Read, Write};
-    use zip::result::ZipError;
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -150,10 +152,11 @@ fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             continue;
         }
 
-        let method = if matches!(file.compression(), CompressionMethod::Unsupported(_)) {
-            CompressionMethod::Deflated
+        let method = file.compression();
+        let method = if method == CompressionMethod::Stored || method == CompressionMethod::Deflated {
+            method
         } else {
-            file.compression()
+            CompressionMethod::Deflated
         };
         let options = SimpleFileOptions::default()
             .compression_method(method)
