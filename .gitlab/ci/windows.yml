@@ -1,5 +1,9 @@
 # Windows pipeline — standalone child pipeline (cross-compiled from Linux)
 # Triggered from parent .gitlab-ci.yml (job "windows")
+#
+# Speed notes:
+# - cargo registry + windows target dir cached (key on Cargo.lock)
+# - prebuilt mingw toolchain via apt (fast)
 
 stages:
   - build
@@ -10,11 +14,22 @@ variables:
   CARGO_TERM_COLOR: "always"
   CARGO_INCREMENTAL: "0"
 
+cache:
+  key:
+    files:
+      - neuron-encrypt/Cargo.lock
+    prefix: windows
+  paths:
+    - .cargo-home/
+    - neuron-encrypt/target/
+
 build-windows:
   stage: build
   image: rust:1.88-slim
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends clang lld pkg-config libssl-dev build-essential mingw-w64
+    - apt-get update && apt-get install -y --no-install-recommends clang lld pkg-config libssl-dev build-essential curl mingw-w64
     - rustup target add x86_64-pc-windows-gnu
     - mkdir -p neuron-encrypt/.cargo && printf '[target.x86_64-pc-windows-gnu]\nlinker = "x86_64-w64-mingw32-gcc"\nar = "x86_64-w64-mingw32-gcc-ar"\n' > neuron-encrypt/.cargo/config.toml
   script:
@@ -31,16 +46,29 @@ package-windows:
   stage: package
   needs: [build-windows]
   image: alpine:3.20
-  before_script:
-    - apk add --no-cache zip
   script:
+    - apk add --no-cache zip curl
     - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
-    - mkdir -p release/neuron-encrypt-$VERSION-windows-x86_64
-    - cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt.exe release/neuron-encrypt-$VERSION-windows-x86_64/
-    - cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt-cli.exe release/neuron-encrypt-$VERSION-windows-x86_64/
-    - zip -r neuron-encrypt-$VERSION-windows-x86_64.zip release/neuron-encrypt-$VERSION-windows-x86_64
-    - sha256sum neuron-encrypt-$VERSION-windows-x86_64.zip > SHA256SUMS-windows.txt
+    - NAME="neuron-encrypt-$VERSION-windows-x86_64"
+    - mkdir -p release/$NAME
+    - cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt.exe release/$NAME/
+    - cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt-cli.exe release/$NAME/
+    - zip -qr $NAME.zip release/$NAME
+    - sha256sum $NAME.zip > SHA256SUMS-windows.txt
     - cat SHA256SUMS-windows.txt
+    # Permanent product link (generic package registry — never expires)
+    - |
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file $NAME.zip \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${NAME}.zip" \
+      && echo "PRODUCT LINK (stable): ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${NAME}.zip" \
+      && echo "Browse: ${CI_PROJECT_URL}/-/packages/generic/neuron-encrypt/${VERSION}" \
+      || echo "WARN: package upload failed (registry disabled?)"
+    - |
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file SHA256SUMS-windows.txt \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/SHA256SUMS-windows.txt" \
+      || true
   artifacts:
     paths:
       - neuron-encrypt-*-windows-x86_64.zip

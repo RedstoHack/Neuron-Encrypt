@@ -1,5 +1,9 @@
 # Linux pipeline — standalone child pipeline
 # Triggered from parent .gitlab-ci.yml (job "linux")
+#
+# Speed notes:
+# - cargo registry/target cached (key on Cargo.lock)
+# - tests intentionally NOT run here (they run in the MR quality pipeline)
 
 stages:
   - build
@@ -10,16 +14,26 @@ variables:
   CARGO_TERM_COLOR: "always"
   CARGO_INCREMENTAL: "0"
 
+cache:
+  key:
+    files:
+      - neuron-encrypt/Cargo.lock
+    prefix: linux
+  paths:
+    - .cargo-home/
+    - neuron-encrypt/target/
+
 build-linux:
   stage: build
   image: rust:1.88-slim
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends clang lld pkg-config libssl-dev build-essential
+    - apt-get update && apt-get install -y --no-install-recommends clang lld pkg-config libssl-dev build-essential curl
   script:
     - echo "Building for Linux x86_64..."
     - cd neuron-encrypt
     - cargo build --release --locked --bin neuron-encrypt --bin neuron-encrypt-cli
-    - cargo test --release --locked --lib
   artifacts:
     paths:
       - neuron-encrypt/target/release/neuron-encrypt
@@ -30,16 +44,31 @@ package-linux:
   stage: package
   needs: [build-linux]
   image: alpine:3.20
-  before_script:
-    - apk add --no-cache tar
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
   script:
+    - apk add --no-cache tar curl
     - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
-    - mkdir -p release/neuron-encrypt-$VERSION-linux-x86_64
-    - cp neuron-encrypt/target/release/neuron-encrypt release/neuron-encrypt-$VERSION-linux-x86_64/
-    - cp neuron-encrypt/target/release/neuron-encrypt-cli release/neuron-encrypt-$VERSION-linux-x86_64/
-    - tar -czf neuron-encrypt-$VERSION-linux-x86_64.tar.gz -C release neuron-encrypt-$VERSION-linux-x86_64
-    - sha256sum neuron-encrypt-$VERSION-linux-x86_64.tar.gz > SHA256SUMS-linux.txt
+    - NAME="neuron-encrypt-$VERSION-linux-x86_64"
+    - mkdir -p release/$NAME
+    - cp neuron-encrypt/target/release/neuron-encrypt release/$NAME/
+    - cp neuron-encrypt/target/release/neuron-encrypt-cli release/$NAME/
+    - tar -czf $NAME.tar.gz -C release $NAME
+    - sha256sum $NAME.tar.gz > SHA256SUMS-linux.txt
     - cat SHA256SUMS-linux.txt
+    # Permanent product link (generic package registry — never expires)
+    - |
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file $NAME.tar.gz \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${NAME}.tar.gz" \
+      && echo "PRODUCT LINK (stable): ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${NAME}.tar.gz" \
+      && echo "Browse: ${CI_PROJECT_URL}/-/packages/generic/neuron-encrypt/${VERSION}" \
+      || echo "WARN: package upload failed (registry disabled?)"
+    - |
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file SHA256SUMS-linux.txt \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/SHA256SUMS-linux.txt" \
+      || true
   artifacts:
     paths:
       - neuron-encrypt-*-linux-x86_64.tar.gz
