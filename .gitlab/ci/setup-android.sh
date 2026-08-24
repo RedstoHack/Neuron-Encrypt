@@ -26,14 +26,18 @@ test -f "$ANDROID_NDK_HOME/source.properties" || { echo "FATAL: NDK missing afte
 # ---- Rust targets ----------------------------------------------------------
 rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
 
-# ---- cargo-ndk: prebuilt binary, falls back to source compile --------------
+# ---- cargo-ndk: prebuilt binary (any archive layout), fallback to source ---
 mkdir -p "$CARGO_HOME/bin"
 if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ]; then
+  tmpd=$(mktemp -d)
   if curl -sSfL https://github.com/bbqsrc/cargo-ndk/releases/download/v4.1.2/cargo-ndk-x86_64-unknown-linux-gnu-v4.1.2.tgz \
-       | tar -xz -C "$CARGO_HOME/bin"; then
-    chmod +x "$CARGO_HOME/bin/cargo-ndk"
-  else
-    echo "prebuilt download failed; compiling from source"
+       | tar -xz -C "$tmpd"; then
+    BIN=$(find "$tmpd" -type f -name cargo-ndk | head -1)
+    [ -n "$BIN" ] && install -m 755 "$BIN" "$CARGO_HOME/bin/cargo-ndk"
+  fi
+  rm -rf "$tmpd"
+  if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ]; then
+    echo "prebuilt unavailable; compiling cargo-ndk from source"
     cargo install cargo-ndk --locked --version 4.1.2
   fi
 fi
