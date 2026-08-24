@@ -807,6 +807,7 @@ fun defaultOutputName(mode: FileMode, inputName: String): String {
                 "$name.decrypted"
             }
         }
+        FileMode.Scrub -> defaultScrubOutputName(name)
     }
 }
 
