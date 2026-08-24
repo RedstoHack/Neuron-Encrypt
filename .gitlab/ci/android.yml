@@ -1,12 +1,11 @@
 # Android pipeline — standalone child pipeline
 # Triggered from parent .gitlab-ci.yml (job "android")
 #
-# Speed notes:
-# - Android SDK/NDK cached inside the project (.ci-android) — 2 GB NDK is
-#   downloaded only once per cache key, not on every run
+# Speed optimizations (kept deliberately conservative):
+# - single cache entry: Android SDK+NDK (.ci-android), cargo home, gradle homes
+#   => the 2 GB NDK download/install happens once, not per run
 # - prebuilt cargo-ndk binary (~15 s) instead of compiling from source (~4 min)
-# - 4 ABIs built IN PARALLEL with separate target dirs
-# - gradle + cargo caches warm on every subsequent run
+# - no tests in release build job (they live in the MR quality pipeline)
 
 stages:
   - build
@@ -20,31 +19,24 @@ variables:
   ANDROID_NDK_HOME: "$CI_PROJECT_DIR/.ci-android/sdk/ndk/26.1.10909125"
   ANDROID_NDK_ROOT: "$CI_PROJECT_DIR/.ci-android/sdk/ndk/26.1.10909125"
   GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle-home"
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
 
 cache:
-  - key:
-      files:
-        - neuron-encrypt/Cargo.lock
-      prefix: android-cargo
-    paths:
-      - .cargo-home/
-      - .gradle-home/
-      - android/.gradle/
-    policy: pull-push
-  - key: android-sdk-v1
-    paths:
-      - .ci-android/sdk/
-    policy: pull-push
+  key: android-v2
+  paths:
+    - .ci-android/sdk/
+    - .cargo-home/
+    - .gradle-home/
+    - android/.gradle/
 
 build-android-apk:
   stage: build
   image: rust:1.88-slim
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk-headless unzip wget curl ca-certificates clang lld pkg-config libssl-dev build-essential file git xz-utils
+    - apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk-headless unzip wget curl ca-certificates clang lld pkg-config libssl-dev build-essential file git
     - export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
     - export PATH="$JAVA_HOME/bin:$HOME/.cargo/bin:$PATH"
-    - export CARGO_HOME="$CI_PROJECT_DIR/.cargo-home"
-    # ---- SDK / NDK (skips everything if cache restored) -------------------
+    # ---- SDK + NDK (skips when restored from cache) -----------------------
     - |
       if [ ! -f "$ANDROID_NDK_HOME/source.properties" ]; then
         echo "Installing Android SDK + NDK into $ANDROID_HOME ..."
@@ -56,42 +48,27 @@ build-android-apk:
         "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
           "platforms;android-34" "build-tools;34.0.0" "platform-tools" "ndk;26.1.10909125" > /dev/null
       else
-        echo "SDK/NDK restored from cache — skipping install"
+        echo "SDK/NDK restored from cache"
       fi
     - test -f "$ANDROID_NDK_HOME/source.properties" || { echo "FATAL: NDK missing after setup"; exit 1; }
-    # ---- Rust targets + prebuilt cargo-ndk --------------------------------
+    # ---- Rust targets + cargo-ndk (prebuilt binary, falls back to source) -
     - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+    - mkdir -p "$CARGO_HOME/bin"
     - |
       if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ]; then
-        mkdir -p "$CARGO_HOME/bin"
         curl -sSfL https://github.com/bbqsrc/cargo-ndk/releases/download/v4.1.2/cargo-ndk-x86_64-unknown-linux-gnu-v4.1.2.tgz \
-          | tar -xz -C "$CARGO_HOME/bin"
-        chmod +x "$CARGO_HOME/bin/cargo-ndk"
+          | tar -xz -C "$CARGO_HOME/bin" \
+          && chmod +x "$CARGO_HOME/bin/cargo-ndk" \
+          || { echo "prebuilt download failed; compiling from source"; cargo install cargo-ndk --locked --version 4.1.2; }
       fi
     - export PATH="$CARGO_HOME/bin:$PATH"
     - cargo ndk --version
   script:
-    - cd neuron-encrypt-jni
-    # ---- Build all 4 ABIs in PARALLEL (separate target dirs) --------------
-    - |
-      pids=""
-      for t in arm64-v8a:aarch64-linux-android armeabi-v7a:armv7-linux-androideabi x86_64:x86_64-linux-android x86:i686-linux-android; do
-        abi="${t%%:*}"; triple="${t##*:}"
-        echo ">>> building $abi ($triple)"
-        CARGO_TARGET_DIR="target-$triple" \
-        CARGO_HOME="$CI_PROJECT_DIR/.cargo-home" \
-          cargo ndk --platform 24 -t "$abi" -o "../android/app/src/main/jniLibs-out/$abi" build --release &
-        pids="$pids $!"
-      done
-      rc=0
-      for pid in $pids; do wait "$pid" || rc=1; done
-      [ $rc -eq 0 ] || { echo "one or more ABI builds failed"; exit 1; }
-    # ---- Merge ABI outputs into jniLibs ------------------------------------
-    - rm -rf ../android/app/src/main/jniLibs && mkdir -p ../android/app/src/main/jniLibs
-    - cp -r ../android/app/src/main/jniLibs-out/* ../android/app/src/main/jniLibs/
-    - find ../android/app/src/main/jniLibs -name "*.so" | sort
-    # ---- Assemble APK -------------------------------------------------------
-    - cd ../android
+    - echo "Building Android JNI libs (4 ABIs)..."
+    - chmod +x android/build-rust.sh
+    - ./android/build-rust.sh
+    - echo "Assembling APK..."
+    - cd android
     - export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
     - export PATH="$JAVA_HOME/bin:$PATH"
     - ./gradlew :app:assembleStandardDebug --no-daemon
@@ -117,8 +94,7 @@ package-android:
         --upload-file $NAME \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${NAME}" \
       && echo "PRODUCT LINK (stable): ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${NAME}" \
-      && echo "Browse: ${CI_PROJECT_URL}/-/packages/generic/neuron-encrypt/${VERSION}" \
-      || echo "WARN: package upload failed (registry disabled?)"
+      && echo "Browse: ${CI_PROJECT_URL}/-/packages/generic/neuron-encrypt/${VERSION}"
     - |
       curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
         --upload-file SHA256SUMS-android.txt \
