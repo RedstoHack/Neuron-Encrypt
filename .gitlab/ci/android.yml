@@ -55,10 +55,9 @@ package-android:
   stage: package
   needs: [build-android-apk]
   image: alpine:3.20
-  before_script:
-    - apk add --no-cache
   script:
-    - VERSION=$(grep '^version' ../neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
+    - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
+    - echo "Packaging neuron-encrypt-$VERSION-android.apk"
     - cp android/app/build/outputs/apk/standard/debug/app-standard-debug.apk neuron-encrypt-$VERSION-android.apk
     - sha256sum neuron-encrypt-$VERSION-android.apk > SHA256SUMS-android.txt
     - cat SHA256SUMS-android.txt
