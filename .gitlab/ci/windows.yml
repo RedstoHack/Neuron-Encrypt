@@ -65,6 +65,17 @@ package-windows:
       && echo "Browse: ${CI_PROJECT_URL}/-/packages/generic/neuron-encrypt/${VERSION}" \
       || echo "WARN: package upload failed (registry disabled?)"
     - |
+      CLI_NAME="neuron-encrypt-cli-${VERSION}-windows-x86_64.exe"
+      cp neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt-cli.exe "$CLI_NAME"
+      sha256sum "$CLI_NAME" > SHA256SUMS-cli-windows.txt
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file "$CLI_NAME" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_NAME}"
+      echo "CLI PRODUCT LINK (stable): ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_NAME}"
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file SHA256SUMS-cli-windows.txt \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-windows.txt"
+    - |
       curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
         --upload-file SHA256SUMS-windows.txt \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/SHA256SUMS-windows.txt" \

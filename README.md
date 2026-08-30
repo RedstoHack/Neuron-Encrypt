@@ -77,15 +77,34 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 
 | Platform | Type | Link |
 |----------|------|------|
-| 🪟 Windows | x64 installer + portable | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
-| 🍎 macOS | Universal (Intel + Apple Silicon) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| 🪟 Windows | x86_64 GUI + CLI ZIP | [GitLab packages ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) |
+| 🍎 macOS | x86_64 GUI + CLI archive; Apple Silicon build is best-effort | [GitLab packages ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) |
 | 🐧 Linux | x86_64 GUI + CLI archive | [Download from GitLab Package Registry ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) |
 | 🤖 Android | APK (Android 7.0+) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
-| ⌨️ CLI | Included in the Linux archive | Extract `neuron-encrypt-cli` and place it in `~/.local/bin/` |
+| 🖥️ Desktop GUI | Built alongside the CLI on Linux, Windows, and macOS | Use the platform archive above |
+| ⌨️ Linux CLI | Standalone x86_64 binary | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/neuron-encrypt-cli-2.2.0-linux-x86_64) |
+| ⌨️ Windows CLI | Standalone x86_64 `.exe` | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/neuron-encrypt-cli-2.2.0-windows-x86_64.exe) |
+| ⌨️ macOS CLI | Standalone Intel binary | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/neuron-encrypt-cli-2.2.0-macos-x86_64) |
 
-**No account is required.** The Linux archive is served by GitLab’s generic Package Registry, so users do not need a Cargo account, GitHub account, or GitHub sign-in. Choose the matching version from the [package list](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages), download the `.tar.gz`, and verify it with the adjacent `SHA256SUMS-linux.txt` file when published.
+**No account is required.** The GUI+CLI archives and standalone CLI binaries are published through GitLab’s Generic Package Registry, so users do not need a Cargo account, GitHub account, or GitHub sign-in. The Linux and Windows CLI links above are live for version `2.2.0`; the macOS link becomes live when the macOS packaging job publishes its archive.
 
-**Verify your download:** SHA-256 hashes are published with each package and in the [release notes](https://gitlab.com/theredhacker0345/neuron-encrypt/releases).
+For Linux, install the standalone CLI into your user path:
+
+```bash
+VERSION=2.2.0
+CLI_FILE="neuron-encrypt-cli-${VERSION}-linux-x86_64"
+curl -fL "https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_FILE}" -o "$CLI_FILE"
+curl -fL "https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-linux.txt" -o SHA256SUMS-cli-linux.txt
+sha256sum --check SHA256SUMS-cli-linux.txt
+chmod +x "$CLI_FILE"
+install -Dm755 "$CLI_FILE" "$HOME/.local/bin/neuron-encrypt-cli"
+neuron-encrypt-cli --help
+```
+
+
+On Windows, download the `.exe` link and run `neuron-encrypt-cli-2.2.0-windows-x86_64.exe --help`. Its checksum is available at [SHA256SUMS-cli-windows.txt](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/SHA256SUMS-cli-windows.txt). On macOS Intel, download the macOS CLI link when it is published, run `chmod +x neuron-encrypt-cli-2.2.0-macos-x86_64`, and execute it with `./neuron-encrypt-cli-2.2.0-macos-x86_64 --help`. Apple Silicon users should use the macOS archive until a native universal CLI package is published.
+
+**Verify your download:** SHA-256 hashes are published with each package and in the [release notes](https://gitlab.com/theredhacker0345/neuron-encrypt/releases). Standalone CLI checksums are published beside the binaries as `SHA256SUMS-cli-linux.txt`, `SHA256SUMS-cli-windows.txt`, and `SHA256SUMS-cli-macos.txt` when the corresponding platform package is published.
 
 ---
 
@@ -395,12 +414,12 @@ See [CLI_IMPROVEMENT_PLAN.md](CLI_IMPROVEMENT_PLAN.md) for the post-review impro
 ## Distribution
 | Channel | Package | Status |
 |---------|---------|--------|
-| [GitLab Package Registry](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) | Linux x86_64 GUI + CLI archive | ✅ Recommended; no account required |
-| [GitLab Releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases) | Release notes, source archives, and platform assets | ✅ Published |
-| [crates.io](https://crates.io/crates/neuron-encrypt) | `neuron-encrypt` core + `neuron-encrypt-cli` CLI | ✅ Published; login is not required to install public crates |
+| [GitLab Package Registry](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) | GUI + CLI archives and standalone CLI binaries for desktop platforms | ✅ Recommended; no account required |
+| [GitLab Releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases) | Release notes, source archives, and platform assets | ✅ Published; platform assets depend on the completed packaging job |
+| [crates.io](https://crates.io/crates/neuron-encrypt) | `neuron-encrypt` core + `neuron-encrypt-cli` CLI | ✅ Developer channel; login is not required to install public crates |
 | [F-Droid](https://f-droid.org/packages/com.neuronencrypt.app/) | Android APK | ⏳ Pending submission |
 | [Homebrew](https://brew.sh) | `neuron-encrypt` formula | ❓ Planned if there is demand |
-| AppImage / Snap / Scoop | — | ❓ Future packaging options; direct GitLab archives are the current easiest desktop path |
+| AppImage / Snap / Scoop | — | ❓ Future packaging options; direct GitLab packages are the current easiest desktop path |
 
 ---
 

@@ -56,7 +56,8 @@ package-linux:
     - tar -czf $NAME.tar.gz -C release $NAME
     - sha256sum $NAME.tar.gz > SHA256SUMS-linux.txt
     - cat SHA256SUMS-linux.txt
-    # Permanent product link (generic package registry — never expires)
+    # Permanent product links (generic package registry — never expires).
+    # Publish the archive for GUI + CLI users and a standalone CLI binary for scripts.
     - |
       curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
         --upload-file $NAME.tar.gz \
@@ -64,6 +65,17 @@ package-linux:
       && echo "PRODUCT LINK (stable): ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${NAME}.tar.gz" \
       && echo "Browse: ${CI_PROJECT_URL}/-/packages/generic/neuron-encrypt/${VERSION}" \
       || echo "WARN: package upload failed (registry disabled?)"
+    - |
+      CLI_NAME="neuron-encrypt-cli-${VERSION}-linux-x86_64"
+      cp neuron-encrypt/target/release/neuron-encrypt-cli "$CLI_NAME"
+      sha256sum "$CLI_NAME" > SHA256SUMS-cli-linux.txt
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file "$CLI_NAME" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_NAME}"
+      echo "CLI PRODUCT LINK (stable): ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_NAME}"
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file SHA256SUMS-cli-linux.txt \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-linux.txt"
     - |
       curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
         --upload-file SHA256SUMS-linux.txt \

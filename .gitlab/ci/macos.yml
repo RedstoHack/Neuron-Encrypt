@@ -43,6 +43,18 @@ package-macos:
     - tar -czf neuron-encrypt-$VERSION-macos-x86_64.tar.gz -C release neuron-encrypt-$VERSION-macos-x86_64
     - shasum -a 256 neuron-encrypt-$VERSION-macos-x86_64.tar.gz > SHA256SUMS-macos.txt
     - cat SHA256SUMS-macos.txt
+    - |
+      CLI_NAME="neuron-encrypt-cli-${VERSION}-macos-x86_64"
+      cp neuron-encrypt/target/x86_64-apple-darwin/release/neuron-encrypt-cli "$CLI_NAME"
+      shasum -a 256 "$CLI_NAME" > SHA256SUMS-cli-macos.txt
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file "$CLI_NAME" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_NAME}"
+      echo "CLI PRODUCT LINK (stable): ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_NAME}"
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file SHA256SUMS-cli-macos.txt \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-macos.txt"
+
   artifacts:
     paths:
       - neuron-encrypt-*-macos-x86_64.tar.gz
