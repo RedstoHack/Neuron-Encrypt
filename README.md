@@ -79,11 +79,13 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 |----------|------|------|
 | 🪟 Windows | x64 installer + portable | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
 | 🍎 macOS | Universal (Intel + Apple Silicon) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
-| 🐧 Linux | x64 static binary | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| 🐧 Linux | x86_64 GUI + CLI archive | [Download from GitLab Package Registry ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) |
 | 🤖 Android | APK (Android 7.0+) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
-| ⌨️ CLI | For scripts and CI/CD | `cargo install neuron-encrypt-cli` (or `cargo install --git https://gitlab.com/theredhacker0345/neuron-encrypt --bin neuron-encrypt-cli`) |
+| ⌨️ CLI | Included in the Linux archive | Extract `neuron-encrypt-cli` and place it in `~/.local/bin/` |
 
-**Verify your download:** SHA-256 hashes are published in each [release note](https://gitlab.com/theredhacker0345/neuron-encrypt/releases).
+**No account is required.** The Linux archive is served by GitLab’s generic Package Registry, so users do not need a Cargo account, GitHub account, or GitHub sign-in. Choose the matching version from the [package list](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages), download the `.tar.gz`, and verify it with the adjacent `SHA256SUMS-linux.txt` file when published.
+
+**Verify your download:** SHA-256 hashes are published with each package and in the [release notes](https://gitlab.com/theredhacker0345/neuron-encrypt/releases).
 
 ---
 
@@ -188,18 +190,55 @@ Guarantees:
 
 ### Install
 
-```bash
-# From crates.io (CLI only)
-cargo install neuron-encrypt-cli
+#### Recommended: download the Linux archive
 
-# From source (GUI + CLI)
+This is the easiest option for Linux Mint. It does not require Rust, Cargo, a Cargo account, or GitHub authentication.
+
+1. Open the [Neuron Encrypt GitLab packages](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) page and choose the version you want.
+2. Download the Linux `.tar.gz` package and its checksum file.
+3. Verify the archive, extract it, and install the binaries locally:
+
+```bash
+VERSION=2.2.0
+ARCHIVE="neuron-encrypt-${VERSION}-linux-x86_64.tar.gz"
+
+# Download SHA256SUMS-linux.txt beside the archive, then verify the archive.
+sha256sum "$ARCHIVE"
+# Compare the output with the matching archive entry in SHA256SUMS-linux.txt.
+
+tar -xzf "$ARCHIVE"
+install -Dm755 "neuron-encrypt-${VERSION}-linux-x86_64/neuron-encrypt" "$HOME/.local/bin/neuron-encrypt"
+install -Dm755 "neuron-encrypt-${VERSION}-linux-x86_64/neuron-encrypt-cli" "$HOME/.local/bin/neuron-encrypt-cli"
+```
+
+Compare the printed SHA-256 value with the matching entry in `SHA256SUMS-linux.txt` before running the binaries. Start a new terminal if `~/.local/bin` is not already on your `PATH`.
+
+#### Optional: build from source
+
+A Cargo account is **not** needed for a normal public dependency download. If you prefer a local build, Linux Mint users can use the distribution packages instead of installing `rustup`:
+
+```bash
+sudo apt update
+sudo apt install --yes cargo rustc build-essential pkg-config libssl-dev
+
 git clone https://gitlab.com/theredhacker0345/neuron-encrypt.git
 cd neuron-encrypt
-cargo build --release
-
-# CLI only (faster, no GUI deps)
-cargo build --release --bin neuron-encrypt-cli
+cargo build --release --locked --bin neuron-encrypt --bin neuron-encrypt-cli
 ```
+
+The resulting files are `neuron-encrypt/target/release/neuron-encrypt` and `neuron-encrypt/target/release/neuron-encrypt-cli`. This build path is optional; most users should use the prebuilt GitLab archive above.
+
+#### Remove only this source build
+
+A source build does not require removing Rust from the whole system. To reclaim the space used by this checkout, run the following from the repository directory:
+
+```bash
+cargo clean
+cd ..
+rm -rf neuron-encrypt
+```
+
+These commands remove only this project’s `target/` directory and checkout. They do not remove Cargo, Rust, or other Rust projects. If you installed Rust only for Neuron Encrypt through `rustup`, you may later run `rustup self uninstall`; otherwise keep the toolchain for your other projects.
 
 ### GUI
 
@@ -354,13 +393,14 @@ See [CLI_IMPROVEMENT_PLAN.md](CLI_IMPROVEMENT_PLAN.md) for the post-review impro
 ---
 
 ## Distribution
-
 | Channel | Package | Status |
 |---------|---------|--------|
-| [crates.io](https://crates.io/crates/neuron-encrypt) | `neuron-encrypt` (core) + `neuron-encrypt-cli` (CLI) | ✅ Published |
+| [GitLab Package Registry](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) | Linux x86_64 GUI + CLI archive | ✅ Recommended; no account required |
+| [GitLab Releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases) | Release notes, source archives, and platform assets | ✅ Published |
+| [crates.io](https://crates.io/crates/neuron-encrypt) | `neuron-encrypt` core + `neuron-encrypt-cli` CLI | ✅ Published; login is not required to install public crates |
 | [F-Droid](https://f-droid.org/packages/com.neuronencrypt.app/) | Android APK | ⏳ Pending submission |
-| [Homebrew](https://brew.sh) | `neuron-encrypt` formula | ❓ Planned if there's demand |
-| npm / Snap / Scoop | — | ❓ Not planned (Rust native tooling covers all platforms via `cargo install`) |
+| [Homebrew](https://brew.sh) | `neuron-encrypt` formula | ❓ Planned if there is demand |
+| AppImage / Snap / Scoop | — | ❓ Future packaging options; direct GitLab archives are the current easiest desktop path |
 
 ---
 
