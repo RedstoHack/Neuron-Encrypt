@@ -40,7 +40,7 @@ build-windows:
     paths:
       - neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt.exe
       - neuron-encrypt/target/x86_64-pc-windows-gnu/release/neuron-encrypt-cli.exe
-    expire_in: 30 days
+    expire_in: "30 days"
 
 package-windows:
   stage: package
@@ -84,4 +84,4 @@ package-windows:
     paths:
       - neuron-encrypt-*-windows-x86_64.zip
       - SHA256SUMS-windows.txt
-    expire_in: 30 days
+    expire_in: "30 days"

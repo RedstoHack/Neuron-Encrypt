@@ -28,7 +28,7 @@ build-macos:
     paths:
       - neuron-encrypt/target/x86_64-apple-darwin/release/neuron-encrypt
       - neuron-encrypt/target/x86_64-apple-darwin/release/neuron-encrypt-cli
-    expire_in: 30 days
+    expire_in: "30 days"
 
 package-macos:
   stage: package
@@ -59,4 +59,4 @@ package-macos:
     paths:
       - neuron-encrypt-*-macos-x86_64.tar.gz
       - SHA256SUMS-macos.txt
-    expire_in: 30 days
+    expire_in: "30 days"

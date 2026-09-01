@@ -47,7 +47,7 @@ build-android-apk:
   artifacts:
     paths:
       - android/app/build/outputs/apk/standard/debug/app-standard-debug.apk
-    expire_in: 30 days
+    expire_in: "30 days"
 
 package-android:
   stage: package
@@ -64,4 +64,4 @@ package-android:
     paths:
       - neuron-encrypt-*-android.apk
       - SHA256SUMS-android.txt
-    expire_in: 30 days
+    expire_in: "30 days"
