@@ -1,117 +1,109 @@
-// Neuron Encrypt website — minimal vanilla JS.
-// No tracking, no analytics, no third-party scripts.
-
 (function () {
   'use strict';
 
-  // ── Nav scroll effect ──
-  const nav = document.getElementById('nav');
-  let lastScroll = 0;
+  var nav = document.querySelector('.nav');
+  var menuToggle = document.querySelector('.menu-toggle');
+  var navLinks = document.querySelector('.nav-links');
+  var navAnchors = Array.prototype.slice.call(document.querySelectorAll('.nav-links a'));
+  var sections = navAnchors
+    .map(function (link) { return document.querySelector(link.getAttribute('href')); })
+    .filter(Boolean);
 
-  function handleScroll() {
-    const scroll = window.scrollY;
-    if (scroll > 20) {
-      nav.classList.add('scrolled');
-    } else {
-      nav.classList.remove('scrolled');
-    }
-    lastScroll = scroll;
+  function closeMenu() {
+    if (!menuToggle || !navLinks) return;
+    menuToggle.setAttribute('aria-expanded', 'false');
+    menuToggle.setAttribute('aria-label', 'Open navigation');
+    navLinks.classList.remove('open');
   }
 
-  window.addEventListener('scroll', handleScroll, { passive: true });
+  if (menuToggle && navLinks) {
+    menuToggle.addEventListener('click', function () {
+      var isOpen = menuToggle.getAttribute('aria-expanded') === 'true';
+      menuToggle.setAttribute('aria-expanded', String(!isOpen));
+      menuToggle.setAttribute('aria-label', isOpen ? 'Open navigation' : 'Close navigation');
+      navLinks.classList.toggle('open', !isOpen);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeMenu();
+    });
+    navLinks.addEventListener('click', function (event) {
+      if (event.target.closest('a')) closeMenu();
+    });
+  }
 
-  // ── Smooth scroll for anchor links ──
+  function updateNav() {
+    if (nav) nav.classList.toggle('scrolled', window.scrollY > 18);
+  }
+  window.addEventListener('scroll', updateNav, { passive: true });
+  updateNav();
+
   document.querySelectorAll('a[href^="#"]').forEach(function (link) {
-    link.addEventListener('click', function (e) {
-      const href = this.getAttribute('href');
-      if (href === '#') return;
-      const target = document.querySelector(href);
-      if (target) {
-        e.preventDefault();
-        const offset = 80; // nav height
-        const top = target.getBoundingClientRect().top + window.scrollY - offset;
-        window.scrollTo({ top: top, behavior: 'smooth' });
+    link.addEventListener('click', function (event) {
+      var href = link.getAttribute('href');
+      if (!href || href === '#') return;
+      var target = document.querySelector(href);
+      if (!target) return;
+      event.preventDefault();
+      var top = target.getBoundingClientRect().top + window.scrollY - 78;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      history.replaceState(null, '', href);
+    });
+  });
+
+  if ('IntersectionObserver' in window) {
+    var revealObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.08, rootMargin: '0px 0px -30px 0px' });
+
+    document.querySelectorAll('.reveal').forEach(function (element, index) {
+      element.style.transitionDelay = Math.min((index % 4) * 70, 210) + 'ms';
+      revealObserver.observe(element);
+    });
+
+    var navObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        navAnchors.forEach(function (anchor) {
+          anchor.classList.toggle('active', anchor.getAttribute('href') === '#' + entry.target.id);
+        });
+      });
+    }, { rootMargin: '-35% 0px -55% 0px', threshold: 0 });
+    sections.forEach(function (section) { navObserver.observe(section); });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function (element) { element.classList.add('visible'); });
+  }
+
+  var copyButtons = document.querySelectorAll('.copy-button');
+  copyButtons.forEach(function (button) {
+    button.addEventListener('click', function () {
+      var text = button.getAttribute('data-copy') || '';
+      function done() {
+        var original = button.textContent;
+        button.textContent = 'Copied';
+        window.setTimeout(function () { button.textContent = original; }, 1400);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text, done); });
+      } else {
+        fallbackCopy(text, done);
       }
     });
   });
 
-  // ── Scroll reveal with IntersectionObserver ──
-  if ('IntersectionObserver' in window) {
-    const observer = new IntersectionObserver(
-      function (entries) {
-        entries.forEach(function (entry) {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-            observer.unobserve(entry.target);
-          }
-        });
-      },
-      { threshold: 0.1, rootMargin: '0px 0px -40px 0px' }
-    );
-
-    // Mark elements for reveal (skip hero — visible immediately)
-    const revealSelectors = [
-      '.section-header',
-      '.feature-card',
-      '.download-card',
-      '.download-cli',
-      '.security-card',
-      '.audit-badge',
-      '.faq-list',
-      '.cta-content',
-      '.trust-bar'
-    ];
-
-    revealSelectors.forEach(function (sel) {
-      document.querySelectorAll(sel).forEach(function (el, i) {
-        el.classList.add('reveal');
-        el.style.transitionDelay = ((i % 4) * 60) + 'ms';
-        observer.observe(el);
-      });
-    });
+  function fallbackCopy(text, done) {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand('copy'); done(); } catch (error) { }
+    document.body.removeChild(area);
   }
-
-  // ── Active nav link based on scroll position ──
-  const navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
-  const sections = [];
-  navLinks.forEach(function (link) {
-    const target = document.querySelector(link.getAttribute('href'));
-    if (target) sections.push({ link: link, el: target });
-  });
-
-  if (sections.length > 0 && 'IntersectionObserver' in window) {
-    const navObserver = new IntersectionObserver(
-      function (entries) {
-        entries.forEach(function (entry) {
-          const match = sections.find(function (s) { return s.el === entry.target; });
-          if (match) {
-            if (entry.isIntersecting) {
-              navLinks.forEach(function (l) { l.style.color = ''; });
-              match.link.style.color = 'var(--text-hi)';
-            }
-          }
-        });
-      },
-      { rootMargin: '-40% 0px -55% 0px' }
-    );
-    sections.forEach(function (s) { navObserver.observe(s.el); });
-  }
-
-  // ── Console easter egg ──
-  if (typeof console !== 'undefined' && console.log) {
-    const styles = [
-      'color: #6366f1',
-      'font-size: 24px',
-      'font-weight: bold',
-      'font-family: monospace',
-      'text-shadow: 2px 2px 0 rgba(99,102,241,0.3)'
-    ].join(';');
-
-    console.log('%c🔒 Neuron Encrypt', styles);
-    console.log(
-      '%cLocal file encryption. No accounts. No internet. No compromise.\n' +
-      'Source: https://gitlab.com/theredhacker0345/neuron-encrypt',
-      'color: #a8a8a8; font-family: monospace; font-size: 12px;'
-    );
-  }
-})();
+}());

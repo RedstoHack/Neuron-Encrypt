@@ -387,7 +387,7 @@ Neuron-Encrypt/
 │   ├── neuron-encrypt-jni/  # Rust JNI bridge
 │   └── build-rust.sh        # Cross-compile 4 ABIs
 ├── installer/               # NSIS Windows installer
-├── docs/                    # Website (GitHub Pages)
+├── docs/                    # Website (GitLab Pages)
 ├── fastlane/                # F-Droid metadata
 ├── SECURITY_AUDIT.md        # Full audit report (44 findings)
 ├── CHANGELOG.md             # Version history
