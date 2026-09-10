@@ -20,14 +20,21 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
-  <canvas id="particle-canvas" aria-hidden="true"></canvas>
+  <canvas id="bg-canvas" aria-hidden="true"></canvas>
+  <div class="gradient-orb orb-1" aria-hidden="true"></div>
+  <div class="gradient-orb orb-2" aria-hidden="true"></div>
+  <div class="gradient-orb orb-3" aria-hidden="true"></div>
 
   <header class="site-header" id="top">
     <nav class="nav" aria-label="Primary navigation">
       <div class="nav-inner">
         <a class="brand" href="#top" aria-label="Neuron Encrypt home">
           <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><rect x="3" y="10.5" width="18" height="10" rx="2.5"></rect><path d="M7 10.5V7a5 5 0 0 1 10 0v3.5"></path><circle cx="12" cy="15.5" r="1.2"></circle></svg>
+            <svg class="logo-svg" viewBox="0 0 24 24">
+              <rect x="3" y="10.5" width="18" height="10" rx="2.5" class="logo-lock"></rect>
+              <path d="M7 10.5V7a5 5 0 0 1 10 0v3.5" class="logo-shackle"></path>
+              <circle cx="12" cy="15.5" r="1.2" class="logo-keyhole"></circle>
+            </svg>
           </span>
           <span class="brand-name">Neuron <b>Encrypt</b></span>
         </a>
@@ -54,29 +61,29 @@
   <main id="main">
     <section class="hero section-shell" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <div class="eyebrow"><span class="status-dot"></span> v2.2.0 · local by design</div>
-        <h1 id="hero-title">Your files.<br /><em>Your rules.</em><br /><span class="muted">Your machine.</span></h1>
-        <p class="hero-lede">Neuron Encrypt turns sensitive files into unreadable <code>.vx2</code> containers on the device where they live. No account. No cloud. Nothing to call home.</p>
-        <div class="hero-actions">
-          <a class="button button-primary" href="#download">
+        <div class="eyebrow reveal"><span class="status-dot"></span> v2.2.0 · local by design</div>
+        <h1 id="hero-title" class="reveal">Your files.<br /><em>Your rules.</em><br /><span class="muted">Your machine.</span></h1>
+        <p class="hero-lede reveal">Neuron Encrypt turns sensitive files into unreadable <code>.vx2</code> containers on the device where they live. No account. No cloud. Nothing to call home.</p>
+        <div class="hero-actions reveal">
+          <a class="button button-primary magnetic" href="#download">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
             Get Neuron Encrypt
           </a>
-          <a class="button button-secondary" href="https://gitlab.com/theredhacker0345/neuron-encrypt" target="_blank" rel="noopener">
+          <a class="button button-secondary magnetic" href="https://gitlab.com/theredhacker0345/neuron-encrypt" target="_blank" rel="noopener">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18 9 12l6-6"></path><path d="M18 12h3"></path><path d="M18 6 9 18"></path><path d="M3 3h4"></path><path d="M3 21h4"></path></svg>
             Read the source
           </a>
         </div>
-        <div class="hero-proof">
-          <div><strong>4</strong><span>platforms</span></div>
+        <div class="hero-proof reveal">
+          <div><strong data-count="4">0</strong><span>platforms</span></div>
           <i></i>
-          <div><strong>0</strong><span>network permissions</span></div>
+          <div><strong data-count="0">0</strong><span>network permissions</span></div>
           <i></i>
-          <div><strong>100%</strong><span>Safe Rust core</span></div>
+          <div><strong data-count="100">0</strong><span>% Safe Rust core</span></div>
         </div>
       </div>
 
-      <div class="hero-visual" aria-hidden="true">
+      <div class="hero-visual reveal" aria-hidden="true">
         <div class="visual-grid"></div>
         <div class="vault-panel">
           <div class="panel-top">
@@ -97,28 +104,28 @@
             <div><small>status</small><strong class="online">verified</strong></div>
           </div>
         </div>
-        <div class="floating-note note-one"><span>01</span> drop a file</div>
-        <div class="floating-note note-two"><span>02</span> enter passphrase</div>
-        <div class="floating-note note-three"><span>03</span> .vx2, verified</div>
+        <div class="floating-note note-one reveal"><span>01</span> drop a file</div>
+        <div class="floating-note note-two reveal"><span>02</span> enter passphrase</div>
+        <div class="floating-note note-three reveal"><span>03</span> .vx2, verified</div>
       </div>
     </section>
 
     <section class="trust-strip" aria-label="Product highlights">
-      <div class="trust-item"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg><span>GPLv3 open source</span></div>
-      <div class="trust-item"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path></svg><span>Nonce-misuse resistant</span></div>
-      <div class="trust-item"><svg viewBox="0 0 24 24"><path d="M4 17 12 4l8 13"></path><path d="M7 12h10"></path></svg><span>1 MiB streaming</span></div>
-      <div class="trust-item"><svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg><span>Metadata scrubbing</span></div>
+      <div class="trust-item reveal"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg><span>GPLv3 open source</span></div>
+      <div class="trust-item reveal"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path></svg><span>Nonce-misuse resistant</span></div>
+      <div class="trust-item reveal"><svg viewBox="0 0 24 24"><path d="M4 17 12 4l8 13"></path><path d="M7 12h10"></path></svg><span>1 MiB streaming</span></div>
+      <div class="trust-item reveal"><svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg><span>Metadata scrubbing</span></div>
     </section>
 
     <section class="section section-shell" id="product" aria-labelledby="product-title">
       <div class="section-intro split-intro">
         <div>
-          <div class="section-kicker">The product</div>
-          <h2 id="product-title">A private workspace<br />for your most important <em>files.</em></h2>
+          <div class="section-kicker reveal">The product</div>
+          <h2 id="product-title" class="reveal">A private workspace<br />for your most important <em>files.</em></h2>
         </div>
-        <p class="section-lead">Neuron Encrypt is a local-first encryption tool for people who want strong cryptography without surrendering their workflow. Use the desktop app, a terminal, or Android — the same trusted Rust core is underneath.</p>
+        <p class="section-lead reveal">Neuron Encrypt is a local-first encryption tool for people who want strong cryptography without surrendering their workflow. Use the desktop app, a terminal, or Android — the same trusted Rust core is underneath.</p>
       </div>
-      <div class="product-showcase">
+      <div class="product-showcase reveal">
         <div class="showcase-frame">
           <img src="docs/screenshots/demo.gif" alt="Neuron Encrypt desktop application demo" width="300" height="666" />
           <div class="showcase-caption"><span class="caption-dot"></span> Home → selection → success → about</div>
@@ -132,19 +139,19 @@
         </div>
       </div>
       <div class="screenshots-grid">
-        <div class="screenshot-card" data-tilt>
+        <div class="screenshot-card reveal" data-tilt>
           <img src="docs/screenshots/thumbs/home.png" alt="Home screen" loading="lazy" />
           <div class="screenshot-overlay"><span>Home Screen</span></div>
         </div>
-        <div class="screenshot-card" data-tilt>
+        <div class="screenshot-card reveal" data-tilt>
           <img src="docs/screenshots/thumbs/picker.png" alt="File picker" loading="lazy" />
           <div class="screenshot-overlay"><span>File Selection</span></div>
         </div>
-        <div class="screenshot-card" data-tilt>
+        <div class="screenshot-card reveal" data-tilt>
           <img src="docs/screenshots/thumbs/success.png" alt="Success screen" loading="lazy" />
           <div class="screenshot-overlay"><span>Encryption Complete</span></div>
         </div>
-        <div class="screenshot-card" data-tilt>
+        <div class="screenshot-card reveal" data-tilt>
           <img src="docs/screenshots/thumbs/about.png" alt="About dialog" loading="lazy" />
           <div class="screenshot-overlay"><span>About</span></div>
         </div>
@@ -153,9 +160,9 @@
 
     <section class="section section-tint" id="features" aria-labelledby="features-title">
       <div class="section-heading centered">
-        <div class="section-kicker">Engineered detail</div>
-        <h2 id="features-title">Security that feels<br /><em>effortless.</em></h2>
-        <p>Powerful by default, understandable at a glance, and respectful of the device in your hands.</p>
+        <div class="section-kicker reveal">Engineered detail</div>
+        <h2 id="features-title" class="reveal">Security that feels<br /><em>effortless.</em></h2>
+        <p class="reveal">Powerful by default, understandable at a glance, and respectful of the device in your hands.</p>
       </div>
       <div class="feature-grid">
         <article class="feature-card reveal">
@@ -199,8 +206,8 @@
 
     <section class="section section-shell" id="how-it-works" aria-labelledby="how-title">
       <div class="section-heading centered">
-        <div class="section-kicker">How it works</div>
-        <h2 id="how-title">Four steps between<br /><em>plain text</em> and protected.</h2>
+        <div class="section-kicker reveal">How it works</div>
+        <h2 id="how-title" class="reveal">Four steps between<br /><em>plain text</em> and protected.</h2>
       </div>
       <div class="flow-grid">
         <article class="flow-step reveal"><div class="flow-number">01</div><div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M12 3v10"></path><path d="m8 9 4 4 4-4"></path><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"></path></svg></div><h3>Choose a file</h3><p>Drop it into the app or select it from your device. Encryption and decryption are detected from the file's magic bytes.</p></article>
@@ -214,29 +221,29 @@
       <div class="download-orb" aria-hidden="true"></div>
       <div class="section-shell download-inner">
         <div class="section-heading centered">
-          <div class="section-kicker">Get started</div>
-          <h2 id="download-title">Pick your platform.<br /><em>Keep it local.</em></h2>
-          <p>Download a package from GitLab. Every package includes a checksum so you can verify exactly what arrived.</p>
+          <div class="section-kicker reveal">Get started</div>
+          <h2 id="download-title" class="reveal">Pick your platform.<br /><em>Keep it local.</em></h2>
+          <p class="reveal">Download a package from GitLab. Every package includes a checksum so you can verify exactly what arrived.</p>
         </div>
         <div class="download-grid">
-          <a class="platform-card" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
+          <a class="platform-card magnetic" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
             <span class="platform-icon windows-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1"></rect><rect x="13" y="4" width="8" height="7" rx="1"></rect><rect x="3" y="13" width="8" height="7" rx="1"></rect><rect x="13" y="13" width="8" height="7" rx="1"></rect></svg></span>
             <span class="platform-name">Windows</span><span class="platform-desc">x64 GUI + CLI archive</span><span class="platform-arrow">↗</span>
           </a>
-          <a class="platform-card" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
+          <a class="platform-card magnetic" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
             <span class="platform-icon mac-icon"><svg viewBox="0 0 24 24"><path d="M16 13.5c0-2.2 1.8-3.2 1.9-3.3a3.7 3.7 0 0 0-2.9-1.6c-1.2-.1-2.4.7-3 .7-.6 0-1.5-.7-2.5-.7a3.8 3.8 0 0 0-3.2 2c-1.4 2.4-.4 6 1 8 .7 1 1.4 2.1 2.4 2 1 0 1.3-.6 2.5-.6s1.5.6 2.5.6c1 0 1.7-1 2.4-2 .8-1.2 1.1-2.3 1.1-2.4-.1 0-2.2-.8-2.2-3.7Z"></path><path d="M14.5 6.2c.5-.6.8-1.4.7-2.2-.7 0-1.5.5-2 1.1-.4.5-.8 1.3-.7 2.1.8.1 1.6-.4 2-1Z"></path></svg></span>
             <span class="platform-name">macOS</span><span class="platform-desc">Universal archive</span><span class="platform-arrow">↗</span>
           </a>
-          <a class="platform-card" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
+          <a class="platform-card magnetic" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
             <span class="platform-icon linux-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.4 3.1 7.6 8 9 4.9-1.4 8-4.6 8-9V7l-8-4Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg></span>
             <span class="platform-name">Linux</span><span class="platform-desc">x64 GUI + CLI archive</span><span class="platform-arrow">↗</span>
           </a>
-          <a class="platform-card" href="https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest" target="_blank" rel="noopener">
+          <a class="platform-card magnetic" href="https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest" target="_blank" rel="noopener">
             <span class="platform-icon android-icon"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"></rect><path d="M8 5h8"></path><path d="M10 19h4"></path></svg></span>
             <span class="platform-name">Android</span><span class="platform-desc">APK for Android 7.0+</span><span class="platform-arrow">↗</span>
           </a>
         </div>
-        <div class="cli-panel">
+        <div class="cli-panel reveal">
           <div class="cli-head"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="cli-title">Install the CLI</span><button class="copy-button" type="button" data-copy="VERSION=2.2.0&#10;CLI_FILE=neuron-encrypt-cli-${VERSION}-linux-x86_64&#10;curl -fL \"https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_FILE}\" -o \"$CLI_FILE\"&#10;sha256sum --check SHA256SUMS-cli-linux.txt&#10;chmod +x \"$CLI_FILE\"">Copy</button></div>
           <pre><code>VERSION=2.2.0
 CLI_FILE=neuron-encrypt-cli-${VERSION}-linux-x86_64
@@ -250,10 +257,10 @@ chmod +x "$CLI_FILE"</code></pre>
     <section class="section section-shell" id="security" aria-labelledby="security-title">
       <div class="security-lead">
         <div>
-          <div class="section-kicker">Security</div>
-          <h2 id="security-title">Cryptography you can<br /><em>audit.</em></h2>
+          <div class="section-kicker reveal">Security</div>
+          <h2 id="security-title" class="reveal">Cryptography you can<br /><em>audit.</em></h2>
         </div>
-        <p>Neuron Encrypt cites the standards it uses. The implementation is public, the format is documented, and the security report is part of the repository.</p>
+        <p class="reveal">Neuron Encrypt cites the standards it uses. The implementation is public, the format is documented, and the security report is part of the repository.</p>
       </div>
       <div class="security-grid">
         <article class="crypto-card reveal">
@@ -276,9 +283,9 @@ chmod +x "$CLI_FILE"</code></pre>
 
     <section class="section section-tint" aria-labelledby="privacy-title">
       <div class="section-heading centered">
-        <div class="section-kicker">Privacy by default</div>
-        <h2 id="privacy-title">No tracking. No telemetry.<br /><em>No exceptions.</em></h2>
-        <p>The app does not need a network to work. Android ships without internet or storage permissions and uses the Storage Access Framework.</p>
+        <div class="section-kicker reveal">Privacy by default</div>
+        <h2 id="privacy-title" class="reveal">No tracking. No telemetry.<br /><em>No exceptions.</em></h2>
+        <p class="reveal">The app does not need a network to work. Android ships without internet or storage permissions and uses the Storage Access Framework.</p>
       </div>
       <div class="privacy-grid">
         <div class="privacy-panel reveal"><span class="privacy-number">01</span><h3>No account required</h3><p>There is no sign-in, no profile, and no service to compromise. Your files belong to the filesystem they already live in.</p></div>
@@ -289,8 +296,8 @@ chmod +x "$CLI_FILE"</code></pre>
 
     <section class="section section-shell faq-section" id="faq" aria-labelledby="faq-title">
       <div class="section-heading centered">
-        <div class="section-kicker">Questions</div>
-        <h2 id="faq-title">Asked often.<br /><em>Answered plainly.</em></h2>
+        <div class="section-kicker reveal">Questions</div>
+        <h2 id="faq-title" class="reveal">Asked often.<br /><em>Answered plainly.</em></h2>
       </div>
       <div class="faq-list">
         <details open><summary>Can I recover my files if I forget the passphrase?</summary><p>No. There is no backdoor, recovery key, or master password. If the passphrase is lost, the files are gone. That is intentional: a recovery path that lets you in also lets an attacker in.</p></details>
@@ -305,10 +312,10 @@ chmod +x "$CLI_FILE"</code></pre>
     <section class="cta-section" aria-labelledby="cta-title">
       <div class="cta-glow"></div>
       <div class="cta-content">
-        <div class="section-kicker">Your next private file</div>
-        <h2 id="cta-title">Strong privacy should<br /><em>feel simple.</em></h2>
-        <p>Download Neuron Encrypt and keep the next sensitive file exactly where you want it.</p>
-        <a class="button button-primary button-large" href="#download">Download now <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></a>
+        <div class="section-kicker reveal">Your next private file</div>
+        <h2 id="cta-title" class="reveal">Strong privacy should<br /><em>feel simple.</em></h2>
+        <p class="reveal">Download Neuron Encrypt and keep the next sensitive file exactly where you want it.</p>
+        <a class="button button-primary button-large magnetic reveal" href="#download">Download now <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></a>
       </div>
     </section>
   </main>
