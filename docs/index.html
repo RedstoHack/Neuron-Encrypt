@@ -20,8 +20,7 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
-  <div class="ambient ambient-one" aria-hidden="true"></div>
-  <div class="ambient ambient-two" aria-hidden="true"></div>
+  <canvas id="particle-canvas" aria-hidden="true"></canvas>
 
   <header class="site-header" id="top">
     <nav class="nav" aria-label="Primary navigation">
@@ -132,6 +131,24 @@
           <a class="text-link" href="#how-it-works">See the flow <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></a>
         </div>
       </div>
+      <div class="screenshots-grid">
+        <div class="screenshot-card" data-tilt>
+          <img src="docs/screenshots/thumbs/home.png" alt="Home screen" loading="lazy" />
+          <div class="screenshot-overlay"><span>Home Screen</span></div>
+        </div>
+        <div class="screenshot-card" data-tilt>
+          <img src="docs/screenshots/thumbs/picker.png" alt="File picker" loading="lazy" />
+          <div class="screenshot-overlay"><span>File Selection</span></div>
+        </div>
+        <div class="screenshot-card" data-tilt>
+          <img src="docs/screenshots/thumbs/success.png" alt="Success screen" loading="lazy" />
+          <div class="screenshot-overlay"><span>Encryption Complete</span></div>
+        </div>
+        <div class="screenshot-card" data-tilt>
+          <img src="docs/screenshots/thumbs/about.png" alt="About dialog" loading="lazy" />
+          <div class="screenshot-overlay"><span>About</span></div>
+        </div>
+      </div>
     </section>
 
     <section class="section section-tint" id="features" aria-labelledby="features-title">
@@ -141,37 +158,37 @@
         <p>Powerful by default, understandable at a glance, and respectful of the device in your hands.</p>
       </div>
       <div class="feature-grid">
-        <article class="feature-card">
+        <article class="feature-card reveal">
           <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg></div>
           <h3>Authenticated everywhere</h3>
           <p>VAULTX04 authenticates the header and every streamed chunk, so tampering fails before it can become data.</p>
           <span class="feature-meta">RFC 8452 <i></i> per-chunk tags</span>
         </article>
-        <article class="feature-card">
+        <article class="feature-card reveal">
           <div class="feature-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c.8-4 3.2-6 8-6s7.2 2 8 6"></path></svg></div>
           <h3>A KDF that earns its keep</h3>
           <p>Argon2id uses 256 MiB, three iterations, and four lanes to make offline guessing expensive in hardware and software.</p>
           <span class="feature-meta">Argon2id <i></i> memory-hard</span>
         </article>
-        <article class="feature-card">
+        <article class="feature-card reveal">
           <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M4 18 12 4l8 14"></path><path d="M7 13h10"></path></svg></div>
           <h3>Streaming, not buffering</h3>
           <p>Files move through 1 MiB chunks. A tiny file and a huge archive follow the same bounded-memory path.</p>
           <span class="feature-meta">BE32 stream <i></i> atomic output</span>
         </article>
-        <article class="feature-card">
+        <article class="feature-card reveal">
           <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16"></path><path d="M7 7v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7"></path><path d="M9 7V4h6v3"></path><path d="M10 12h4"></path></svg></div>
           <h3>Secrets get wiped</h3>
           <p>Keys and plaintext buffers use <code>Zeroizing&lt;T&gt;</code>, so sensitive memory is cleared as soon as it goes out of scope.</p>
           <span class="feature-meta">Safe Rust <i></i> zeroize</span>
         </article>
-        <article class="feature-card">
+        <article class="feature-card reveal">
           <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg></div>
           <h3>Metadata scrubbing</h3>
           <p>Remove EXIF, GPS, XMP, IPTC, ID3, and document properties from common images, documents, audio, and video.</p>
           <span class="feature-meta">Clean copy <i></i> fail closed</span>
         </article>
-        <article class="feature-card">
+        <article class="feature-card reveal">
           <div class="feature-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg></div>
           <h3>One core, four platforms</h3>
           <p>Windows, macOS, Linux, and Android share a Rust foundation. Your encrypted files travel with you.</p>
@@ -186,10 +203,10 @@
         <h2 id="how-title">Four steps between<br /><em>plain text</em> and protected.</h2>
       </div>
       <div class="flow-grid">
-        <article class="flow-step"><div class="flow-number">01</div><div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M12 3v10"></path><path d="m8 9 4 4 4-4"></path><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"></path></svg></div><h3>Choose a file</h3><p>Drop it into the app or select it from your device. Encryption and decryption are detected from the file's magic bytes.</p></article>
-        <article class="flow-step"><div class="flow-number">02</div><div class="flow-icon"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg></div><h3>Set a passphrase</h3><p>Use a memorable, high-entropy passphrase. The strength meter gives feedback; the passphrase never touches disk.</p></article>
-        <article class="flow-step"><div class="flow-number">03</div><div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.4 3.1 7.6 8 9 4.9-1.4 8-4.6 8-9V7l-8-4Z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg></div><h3>Encrypt locally</h3><p>The Rust core derives a key, streams the file, authenticates each chunk, and writes a temporary output first.</p></article>
-        <article class="flow-step"><div class="flow-number">04</div><div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"></path></svg></div><h3>Keep the original</h3><p>The output becomes a portable <code>.vx2</code> vault. You can optionally wipe the source after an atomic replacement.</p></article>
+        <article class="flow-step reveal"><div class="flow-number">01</div><div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M12 3v10"></path><path d="m8 9 4 4 4-4"></path><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"></path></svg></div><h3>Choose a file</h3><p>Drop it into the app or select it from your device. Encryption and decryption are detected from the file's magic bytes.</p></article>
+        <article class="flow-step reveal"><div class="flow-number">02</div><div class="flow-icon"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg></div><h3>Set a passphrase</h3><p>Use a memorable, high-entropy passphrase. The strength meter gives feedback; the passphrase never touches disk.</p></article>
+        <article class="flow-step reveal"><div class="flow-number">03</div><div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.4 3.1 7.6 8 9 4.9-1.4 8-4.6 8-9V7l-8-4Z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg></div><h3>Encrypt locally</h3><p>The Rust core derives a key, streams the file, authenticates each chunk, and writes a temporary output first.</p></article>
+        <article class="flow-step reveal"><div class="flow-number">04</div><div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"></path></svg></div><h3>Keep the original</h3><p>The output becomes a portable <code>.vx2</code> vault. You can optionally wipe the source after an atomic replacement.</p></article>
       </div>
     </section>
 
@@ -239,7 +256,7 @@ chmod +x "$CLI_FILE"</code></pre>
         <p>Neuron Encrypt cites the standards it uses. The implementation is public, the format is documented, and the security report is part of the repository.</p>
       </div>
       <div class="security-grid">
-        <article class="crypto-card">
+        <article class="crypto-card reveal">
           <div class="crypto-heading"><span>Cipher suite</span><span class="crypto-live"><i></i> verified</span></div>
           <div class="crypto-row"><span>Encryption</span><code>AES-256-GCM-SIV</code></div>
           <div class="crypto-row"><span>Standard</span><code>RFC 8452</code></div>
@@ -248,13 +265,13 @@ chmod +x "$CLI_FILE"</code></pre>
           <div class="crypto-row"><span>Randomness</span><code>OsRng</code></div>
           <div class="crypto-row"><span>Format</span><code>VAULTX04</code></div>
         </article>
-        <article class="threat-card">
+        <article class="threat-card reveal">
           <div class="crypto-heading"><span>Threat model</span><span class="crypto-muted">honest security</span></div>
           <div class="threat-block protected"><strong>Protected against</strong><ul><li>Offline brute-force</li><li>Ciphertext tampering</li><li>Header tampering</li><li>Nonce reuse</li><li>Truncation and substitution</li></ul></div>
           <div class="threat-block limited"><strong>Not protected against</strong><ul><li>Keyloggers and screen recorders</li><li>Cold-boot / DMA attacks</li><li>Weak passphrases</li><li>File names and sizes</li></ul></div>
         </article>
       </div>
-      <div class="audit-callout"><div class="audit-icon"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg></div><div><strong>Published audit</strong><span>44 findings · 0 critical · 0 high · 9 medium fixed</span></div><a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/SECURITY_AUDIT.md" target="_blank" rel="noopener">Read the report <svg viewBox="0 0 24 24"><path d="M7 17 17 7"></path><path d="M8 7h9v9"></path></svg></a></div>
+      <div class="audit-callout reveal"><div class="audit-icon"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg></div><div><strong>Published audit</strong><span>44 findings · 0 critical · 0 high · 9 medium fixed</span></div><a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/SECURITY_AUDIT.md" target="_blank" rel="noopener">Read the report <svg viewBox="0 0 24 24"><path d="M7 17 17 7"></path><path d="M8 7h9v9"></path></svg></a></div>
     </section>
 
     <section class="section section-tint" aria-labelledby="privacy-title">
@@ -264,9 +281,9 @@ chmod +x "$CLI_FILE"</code></pre>
         <p>The app does not need a network to work. Android ships without internet or storage permissions and uses the Storage Access Framework.</p>
       </div>
       <div class="privacy-grid">
-        <div class="privacy-panel"><span class="privacy-number">01</span><h3>No account required</h3><p>There is no sign-in, no profile, and no service to compromise. Your files belong to the filesystem they already live in.</p></div>
-        <div class="privacy-panel"><span class="privacy-number">02</span><h3>No phone-home behavior</h3><p>The desktop and Android applications are designed for offline operation. Nothing is sent to a server by default.</p></div>
-        <div class="privacy-panel"><span class="privacy-number">03</span><h3>No analytics layer</h3><p>No cookies, no analytics SDK, no remote event tracking. The website is static, and the product is not different.</p></div>
+        <div class="privacy-panel reveal"><span class="privacy-number">01</span><h3>No account required</h3><p>There is no sign-in, no profile, and no service to compromise. Your files belong to the filesystem they already live in.</p></div>
+        <div class="privacy-panel reveal"><span class="privacy-number">02</span><h3>No phone-home behavior</h3><p>The desktop and Android applications are designed for offline operation. Nothing is sent to a server by default.</p></div>
+        <div class="privacy-panel reveal"><span class="privacy-number">03</span><h3>No analytics layer</h3><p>No cookies, no analytics SDK, no remote event tracking. The website is static, and the product is not different.</p></div>
       </div>
     </section>
 
