@@ -467,7 +467,7 @@
           </a>
           <a class="platform-card magnetic reveal" data-os="android" href="https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest" target="_blank" rel="noopener">
             <span class="platform-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"></rect><path d="M8 5h8"></path><path d="M10 19h4"></path></svg></span>
-            <span class="platform-name">Android</span><span class="platform-desc" translate="no">APK · Android 7.0+ · F-Droid pending</span><span class="platform-badge" translate="no">v2.2.0 · v6</span><span class="platform-arrow" aria-hidden="true">↗</span>
+            <span class="platform-name">Android</span><span class="platform-desc" translate="no">APK · Android 7.0+ · F-Droid available</span><span class="platform-badge" translate="no">v2.2.0 · v6</span><span class="platform-arrow" aria-hidden="true">↗</span>
           </a>
         </div>
 
@@ -553,7 +553,7 @@ neuron-encrypt-cli-2.2.0-windows-x86_64.exe --help
         <details data-faq><summary>What does metadata scrubbing actually remove?</summary><p>EXIF/GPS, XMP, IPTC, ICC, and thumbnails from images; author/dates/XMP from PDFs and Office files; ID3, APE, Vorbis, and RIFF tags from audio; iTunes atoms from MP4. Payloads are copied byte-for-byte. Unknown formats fail closed.</p></details>
         <details data-faq><summary>Is there a CLI?</summary><p>Yes — <code translate="no">neuron-encrypt-cli</code> ships with every desktop build: encrypt, decrypt, scrub, pipes, <code translate="no">--json</code>, password files, and shell completions.</p></details>
         <details data-faq><summary>How does this compare to VeraCrypt or Cryptomator?</summary><p>Neuron Encrypt is file-level with a misuse-resistant cipher and memory-hard KDF; VeraCrypt is volume-level, Cryptomator targets cloud files. See the comparison table above for the full breakdown.</p></details>
-        <details data-faq><summary>Why does Windows warn on first install?</summary><p>Authenticode certificates cost hundreds per year; signing lands once F-Droid distribution is established. Click “Run anyway” — and always verify the SHA-256 hash first.</p></details>
+        <details data-faq><summary>Why does Windows warn on first install?</summary><p>Authenticode certificates cost hundreds per year; F-Droid distribution is already live (unsigned build), so Windows signing is the last remaining platform for code signing. Click “Run anyway” — and always verify the SHA-256 hash first.</p></details>
         <details data-faq><summary>How do I report a vulnerability?</summary><p>Use the <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/issues/new?issue[confidential]=true" target="_blank" rel="noopener">GitLab confidential issue form</a>. Never post sensitive details in a public issue.</p></details>
         <details data-faq><summary>What license is Neuron Encrypt under?</summary><p>GPLv3. See the <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a> file for the full text.</p></details>
       </div>

@@ -10,7 +10,7 @@ AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![crates.io](https://img.shields.io/crates/v/neuron-encrypt?style=flat-square&logo=rust&label=crates.io)](https://crates.io/crates/neuron-encrypt)
-[![F-Droid](https://img.shields.io/badge/F--Droid-pending-22c55e?style=flat-square&logo=f-droid)](https://f-droid.org/packages/com.neuronencrypt.app/)
+[![F-Droid](https://img.shields.io/badge/F--Droid-available-22c55e?style=flat-square&logo=f-droid)](https://f-droid.org/packages/com.neuronencrypt.app/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-6366f1?style=flat-square)](#download)
 [![Tests](https://img.shields.io/badge/tests-38%20passing-22c55e?style=flat-square)](#security)
 [![Audit](https://img.shields.io/badge/audit-0%20critical%20%7C%200%20high-22c55e?style=flat-square)](SECURITY_AUDIT.md)
@@ -233,7 +233,7 @@ All three are readable by v2.1. New encryptions use V4. There is no auto-migrati
 <details>
 <summary><b>Why is the binary not code-signed?</b></summary>
 
-Windows is the only platform that requires code signing, and Authenticode certificates cost $200-400/year. Signing is planned once F-Droid distribution is established. For now, Windows SmartScreen will warn on first install — click "Run anyway". Always verify the SHA-256 hash in the release notes against your download.
+Windows is the only platform that requires code signing, and Authenticode certificates cost $200-400/year. F-Droid distribution is already live (unsigned build), so Windows signing is the last remaining platform for code signing. For now, Windows SmartScreen will warn on first install — click "Run anyway". Always verify the SHA-256 hash in the release notes against your download.
 </details>
 
 <details>
@@ -322,7 +322,7 @@ See [CLI_IMPROVEMENT_PLAN.md](../../CLI_IMPROVEMENT_PLAN.md) for the post-review
 | Channel | Package | Status |
 |---------|---------|--------|
 | [crates.io](https://crates.io/crates/neuron-encrypt) | `neuron-encrypt` (core) + `neuron-encrypt-cli` (CLI) | ✅ Published |
-| [F-Droid](https://f-droid.org/packages/com.neuronencrypt.app/) | Android APK | ⏳ Pending submission |
+| [F-Droid](https://f-droid.org/packages/com.neuronencrypt.app/) | Android APK | ✅ Available |
 | [Homebrew](https://brew.sh) | `neuron-encrypt` formula | ❓ Planned if there's demand |
 | npm / Snap / Scoop | — | ❓ Not planned (Rust native tooling covers all platforms via `cargo install`) |
 

@@ -17,7 +17,11 @@ pages:
       - public
   pages: true
   rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - docs/**/*
+    - when: manual
+      allow_failure: false
 
 linux:
   stage: build
