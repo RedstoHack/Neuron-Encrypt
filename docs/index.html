@@ -12,8 +12,8 @@
   <meta property="og:description" content="AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · Safe Rust. Your files never leave your device." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://theredhacker0345.gitlab.io/neuron-encrypt/" />
-  <meta property="og:image" content="https://theredhacker0345.gitlab.io/neuron-encrypt/screenshots/home-screen.png" />
-  <meta property="og:image:alt" content="Neuron Encrypt home screen" />
+  <meta property="og:image" content="https://theredhacker0345.gitlab.io/neuron-encrypt/screenshots/desktop-home.png" />
+  <meta property="og:image:alt" content="Neuron Encrypt desktop app home screen" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Neuron Encrypt — Local File Encryption" />
   <meta name="twitter:description" content="AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · Safe Rust. No accounts, no internet, no compromise." />
@@ -181,20 +181,32 @@
 
       <div class="tab-panels reveal">
         <article class="tab-panel active" id="panel-desktop" role="tabpanel" aria-labelledby="tab-desktop" tabindex="0">
-          <div class="panel-media">
-            <picture>
-              <source srcset="screenshots/demo.webp" type="image/webp" />
-              <img src="screenshots/demo.gif" alt="Neuron Encrypt desktop app cycling through Home, file selection, success and About screens" width="230" height="480" loading="lazy" />
-            </picture>
-            <p class="media-caption"><span class="caption-dot" aria-hidden="true"></span> Home → selection → success → about</p>
+          <div class="panel-media desktop-gallery" role="group" aria-label="Real screenshots of the Neuron Encrypt desktop app">
+            <button class="shot" type="button" data-lightbox="screenshots/desktop-home.png" data-alt="Desktop home screen">
+              <img src="screenshots/desktop-home.png" alt="Desktop home — drop zone and browse buttons" width="1918" height="900" loading="lazy" />
+              <span>Home</span>
+            </button>
+            <button class="shot" type="button" data-lightbox="screenshots/desktop-configure.png" data-alt="Desktop encrypt configuration">
+              <img src="screenshots/desktop-configure.png" alt="Desktop configure — passphrase and cipher details" width="760" height="903" loading="lazy" />
+              <span>Configure</span>
+            </button>
+            <button class="shot" type="button" data-lightbox="screenshots/desktop-processing.png" data-alt="Desktop encryption in progress">
+              <img src="screenshots/desktop-processing.png" alt="Desktop processing — live progress and cancel" width="1917" height="1018" loading="lazy" />
+              <span>Processing</span>
+            </button>
+            <button class="shot" type="button" data-lightbox="screenshots/desktop-success.png" data-alt="Desktop encryption complete">
+              <img src="screenshots/desktop-success.png" alt="Desktop success — vault ready" width="877" height="572" loading="lazy" />
+              <span>Success</span>
+            </button>
+            <p class="media-caption"><span class="caption-dot" aria-hidden="true"></span> real app · Windows · click to enlarge</p>
           </div>
           <div class="panel-copy">
-            <h3>Calm by default, explicit when it matters</h3>
-            <p>Drop a file, set a passphrase, press Encrypt. Auto-detection reads magic bytes so the app already knows whether you mean encrypt or decrypt. Destructive actions — like wiping the source — always ask first.</p>
+            <h3>The actual app, not a mockup</h3>
+            <p>These are real captures of the Windows desktop build. Drop a file or browse from disk, pick <strong>Encrypt</strong>, <strong>Decrypt</strong>, or <strong>Scrub metadata</strong>, set a passphrase, and press the button. The Advanced panel shows the exact cipher suite before you commit.</p>
             <ul class="check-list">
-              <li>Passphrase strength meter, nothing stored</li>
-              <li>Cancel any operation at a chunk boundary</li>
-              <li>Atomic writes — no half-written vaults on crash</li>
+              <li>Single-file and batch upload from the home screen</li>
+              <li>Live progress with cancel at any 1 MiB chunk boundary</li>
+              <li>Success screen with hash details and one-click folder open</li>
             </ul>
             <a class="text-link" href="#download">Get the desktop build <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></a>
           </div>
@@ -202,12 +214,12 @@
         <article class="tab-panel" id="panel-cli" role="tabpanel" aria-labelledby="tab-cli" tabindex="0" hidden>
           <div class="panel-media terminal" role="img" aria-label="Terminal showing encrypt, decrypt and scrub commands">
             <div class="terminal-bar" aria-hidden="true"><span></span><span></span><span></span><em translate="no">neuron · zsh</em></div>
-<pre><code><span class="t-dim">$</span> neuron-encrypt-cli encrypt -i secret.pdf
-<span class="t-green">✓ sealed</span> secret.pdf.vx2 <span class="t-dim">(VAULTX04 · 2.4 MB → 2.4 MB)</span>
-<span class="t-dim">$</span> neuron-encrypt-cli decrypt -i secret.pdf.vx2
-<span class="t-green">✓ opened</span> secret.pdf <span class="t-dim">(auth OK · 3 chunks)</span>
-<span class="t-dim">$</span> neuron-encrypt-cli scrub -i photo.jpg
-<span class="t-green">✓ cleaned</span> photo.clean.jpg <span class="t-dim">(EXIF · GPS · XMP removed)</span></code></pre>
+<pre id="cli-typing"><code><span class="t-line"><span class="t-dim">$</span> neuron-encrypt-cli encrypt -i secret.pdf</span>
+<span class="t-line"><span class="t-green">✓ sealed</span> secret.pdf.vx2 <span class="t-dim">(VAULTX04 · 2.4 MB → 2.4 MB)</span></span>
+<span class="t-line"><span class="t-dim">$</span> neuron-encrypt-cli decrypt -i secret.pdf.vx2</span>
+<span class="t-line"><span class="t-green">✓ opened</span> secret.pdf <span class="t-dim">(auth OK · 3 chunks)</span></span>
+<span class="t-line"><span class="t-dim">$</span> neuron-encrypt-cli scrub -i photo.jpg</span>
+<span class="t-line"><span class="t-green">✓ cleaned</span> photo.clean.jpg <span class="t-dim">(EXIF · GPS · XMP removed)</span><span class="t-caret" aria-hidden="true"></span></span></code></pre>
           </div>
           <div class="panel-copy">
             <h3>Scriptable without surprises</h3>
@@ -256,21 +268,21 @@
       </div>
 
       <div class="screenshots-grid">
-        <button class="screenshot-card reveal" type="button" data-lightbox="screenshots/home-screen.png" data-alt="Home screen">
-          <img src="screenshots/thumbs/home.png" alt="Home screen thumbnail — tap to enlarge" width="400" height="320" loading="lazy" />
-          <span class="screenshot-overlay"><span>Home Screen</span></span>
+        <button class="screenshot-card reveal" type="button" data-lightbox="screenshots/desktop-home.png" data-alt="Desktop home screen">
+          <img src="screenshots/desktop-home.png" alt="Desktop home screen — tap to enlarge" width="1918" height="900" loading="lazy" />
+          <span class="screenshot-overlay"><span>Desktop · Home</span></span>
         </button>
-        <button class="screenshot-card reveal" type="button" data-lightbox="screenshots/file-picker.png" data-alt="File picker">
-          <img src="screenshots/thumbs/picker.png" alt="File picker thumbnail — tap to enlarge" width="400" height="320" loading="lazy" />
-          <span class="screenshot-overlay"><span>File Selection</span></span>
+        <button class="screenshot-card reveal" type="button" data-lightbox="screenshots/desktop-configure.png" data-alt="Desktop encrypt configuration">
+          <img src="screenshots/desktop-configure.png" alt="Desktop encrypt configuration — tap to enlarge" width="760" height="903" loading="lazy" />
+          <span class="screenshot-overlay"><span>Desktop · Configure</span></span>
         </button>
-        <button class="screenshot-card reveal" type="button" data-lightbox="screenshots/success-screen.png" data-alt="Encryption complete">
-          <img src="screenshots/thumbs/success.png" alt="Encryption complete thumbnail — tap to enlarge" width="400" height="320" loading="lazy" />
-          <span class="screenshot-overlay"><span>Encryption Complete</span></span>
+        <button class="screenshot-card reveal" type="button" data-lightbox="screenshots/desktop-processing.png" data-alt="Desktop encryption in progress">
+          <img src="screenshots/desktop-processing.png" alt="Desktop encryption progress — tap to enlarge" width="1917" height="1018" loading="lazy" />
+          <span class="screenshot-overlay"><span>Desktop · Processing</span></span>
         </button>
-        <button class="screenshot-card reveal" type="button" data-lightbox="screenshots/about-dialog.png" data-alt="About dialog">
-          <img src="screenshots/thumbs/about.png" alt="About dialog thumbnail — tap to enlarge" width="400" height="320" loading="lazy" />
-          <span class="screenshot-overlay"><span>About</span></span>
+        <button class="screenshot-card reveal" type="button" data-lightbox="screenshots/desktop-success.png" data-alt="Desktop encryption complete">
+          <img src="screenshots/desktop-success.png" alt="Desktop encryption complete — tap to enlarge" width="877" height="572" loading="lazy" />
+          <span class="screenshot-overlay"><span>Desktop · Success</span></span>
         </button>
       </div>
     </section>

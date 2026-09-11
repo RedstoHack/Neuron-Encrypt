@@ -110,6 +110,16 @@ On Windows, download the `.exe` link and run `neuron-encrypt-cli-2.2.0-windows-x
 
 ## Screenshots
 
+### Desktop app (Windows)
+
+| Home | Configure | Processing | Success |
+|------|-----------|------------|---------|
+| ![Home](docs/screenshots/desktop-home.png) | ![Configure](docs/screenshots/desktop-configure.png) | ![Processing](docs/screenshots/desktop-processing.png) | ![Success](docs/screenshots/desktop-success.png) |
+
+*Real captures of the v2.2.0 desktop build — drop zone, Encrypt/Decrypt/Scrub switcher with live cipher details, cancellable progress, and the completion screen.*
+
+### Android app
+
 <div align="center">
 
 <!-- Animated demo GIF — cycles through all 4 screens -->

@@ -4,6 +4,7 @@
 
   var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var finePointer = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
+  document.documentElement.classList.add('js');
 
   /* ---------- Preloader ---------- */
   var preloader = document.getElementById('preloader');
@@ -157,6 +158,17 @@
   animateCounters();
 
   /* ---------- Generic tabs (product + install) ---------- */
+  var cliTyped = false;
+  function maybeTypeCLI(panelId) {
+    if (panelId !== 'panel-cli' || cliTyped) return;
+    cliTyped = true;
+    var pre = document.getElementById('cli-typing');
+    if (!pre) return;
+    function start() { pre.classList.add('typing'); }
+    if (reduceMotion) { start(); return; }
+    /* wait for the panel switch animation, then type */
+    window.setTimeout(start, 250);
+  }
   function initTabs(tabList) {
     var tabs = Array.prototype.slice.call(tabList.querySelectorAll('[role="tab"]'));
     if (!tabs.length) return;
@@ -170,6 +182,7 @@
         if (panel) {
           panel.hidden = !selected;
           panel.classList.toggle('active', selected);
+          if (selected) maybeTypeCLI(panel.id);
         }
       });
       if (focus) tab.focus();

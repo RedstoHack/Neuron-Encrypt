@@ -15,4 +15,32 @@ fn main() {
 
     println!("cargo:rustc-env=GIT_HASH={git_hash}");
     println!("cargo:rerun-if-changed=.git/HEAD");
+
+    // Windows: embed the brand icon (app.rc -> assets/icon.ico) so the .exe
+    // file, taskbar, shortcuts and Add/Remove Programs all show the same
+    // artwork as the in-app window icon. Soft-fail (warning only) so
+    // toolchains without windres (e.g. MSVC without SDK tools on PATH)
+    // still build exactly like before.
+    #[cfg(windows)]
+    {
+        let out_dir = std::env::var("OUT_DIR").unwrap_or_default();
+        let res_path = format!("{out_dir}/app-icon.res");
+        let compiled = Command::new("windres")
+            .args([
+                "app.rc",
+                "-O",
+                "coff",
+                "-o",
+                res_path.as_str(),
+            ])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if compiled {
+            println!("cargo:rustc-link-arg={res_path}");
+        } else {
+            println!("cargo:warning=icon resource not embedded (windres unavailable)");
+        }
+    }
 }
