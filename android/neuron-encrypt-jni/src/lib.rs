@@ -7,7 +7,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject};
-use jni::sys::{jint, jlong};
+use jni::sys::{jint, jlong, jstring};
 use jni::JNIEnv;
 use jni::JavaVM;
 
@@ -623,16 +623,54 @@ fn cache_free_bytes(dir: &std::path::Path) -> Option<u64> {
     if rc != 0 {
         return None;
     }
-    Some(vfs.f_bavail as u64 * vfs.f_bsize as u64)
+    // f_frsize is the fragment size allocations are actually made of; f_bsize
+    // is the "preferred" block size and can overstate usable space. Fall back
+    // if a volume reports 0 (some FUSE-backed providers do).
+    let unit = if vfs.f_frsize > 0 {
+        vfs.f_frsize as u64
+    } else {
+        vfs.f_bsize as u64
+    };
+    Some(vfs.f_bavail as u64 * unit)
 }
 
+/// Fails fast when the app cache directory cannot hold the scratch copies a
+/// scrub needs (~2x the source: staged input + scrubbed output), so an
+/// oversized file is rejected up front instead of filling the data partition
+/// and then failing with a bare "Storage I/O failed".
+///
+/// `source_size` is the fd's reported size (0 when the provider does not
+/// report one, e.g. pipes); `statvfs` being unavailable fails open because the
+/// write itself will surface a real error.
+fn ensure_scratch_space(dir: &std::path::Path, source_len: u64) -> Result<(), CryptoError> {
+    let Some(free) = cache_free_bytes(dir) else {
+        return Ok(());
+    };
+    let needed = source_len
+        .saturating_mul(2)
+        .saturating_add(SCRUB_MIN_HEADROOM);
+    if free < needed {
+        return Err(CryptoError::Io(io::Error::new(
+            io::ErrorKind::StorageFull,
+            format!("app cache has {free} bytes free but {needed} are required"),
+        )));
+    }
+    Ok(())
+}
+
+// The parameter list deliberately mirrors the JNI entry point it serves (and
+// its Java-side declaration), so the bridge stays a 1:1 mapping rather than an
+// invented struct that both sides would have to keep in sync.
+#[allow(clippy::too_many_arguments)]
 fn native_scrub_impl(
     env: &mut JNIEnv,
     input_fd: jint,
     output_fd: jint,
     cache_dir: &std::ffi::CStr,
+    source_size: jlong,
     progress_listener: &JObject,
-    _cancel_flag: &JObject,
+    report_listener: &JObject,
+    cancel_flag: &JObject,
 ) -> jint {
     use std::io::Read;
     use std::sync::atomic::Ordering;
@@ -688,7 +726,7 @@ fn native_scrub_impl(
     };
 
     // Second global ref owned by the watcher thread.
-    let cancel_java_ref = match env.new_global_ref(_cancel_flag) {
+    let cancel_java_ref = match env.new_global_ref(cancel_flag) {
         Ok(r) => r,
         Err(_) => {
             let _ = env.throw_new(EXCEPTION_CLASS, "Failed to retain cancellation flag.");
@@ -707,6 +745,18 @@ fn native_scrub_impl(
         if !dir.is_dir() {
             return Err(CryptoError::InvalidDestination(dir));
         }
+
+        // ---- Phase 0: free-space pre-flight ----
+        // Reject files that cannot fit *before* writing anything: staging a
+        // huge file only to fail afterwards fills the data partition and
+        // surfaces as a generic storage error.
+        let stat_len = input_file.metadata().map(|m| m.len()).unwrap_or(0);
+        let expected_len = if source_size > 0 {
+            stat_len.max(source_size as u64)
+        } else {
+            stat_len
+        };
+        ensure_scratch_space(&dir, expected_len)?;
 
         // ---- Phase 1: stage input -> cache temp through a fixed buffer ----
         reporter.report(0.02, "Staging file...");
@@ -737,15 +787,12 @@ fn native_scrub_impl(
         };
         drop(input_file);
 
-        // ---- Free-space guard: the scrub writes a second copy beside it ----
-        if let Some(free) = cache_free_bytes(&dir) {
-            let needed = staged_len.saturating_mul(2) + SCRUB_MIN_HEADROOM;
-            if free < needed {
-                return Err(CryptoError::Io(io::Error::new(
-                    io::ErrorKind::StorageFull,
-                    "not enough free space in the app cache directory",
-                )));
-            }
+        // A provider that hands us nothing readable (or a stale cache evicted
+        // mid-copy) would otherwise be "scrubbed" as an empty file; fail closed.
+        if staged_len == 0 {
+            return Err(CryptoError::MalformedFile(
+                "input file produced no readable bytes".to_owned(),
+            ));
         }
 
         // ---- Phase 2: core scrubber on the staged paths ----
@@ -811,12 +858,33 @@ fn native_scrub_impl(
                 )
             };
             reporter.report(1.00, &summary);
+            report_to_java(env, report_listener, &report);
             0
         }
         Err(CryptoError::UnsupportedMediaFormat(reason)) => {
             let _ = env.throw_new(
                 EXCEPTION_CLASS,
                 format!("Unsupported format \u{2014} {reason}"),
+            );
+            2
+        }
+        // Scrub-specific failures, reported in terms the user can act on
+        // instead of the generic "Storage I/O failed." / "Invalid input".
+        Err(CryptoError::Io(ref io_err)) if io_err.kind() == io::ErrorKind::StorageFull => {
+            let _ = env.throw_new(
+                EXCEPTION_CLASS,
+                "Not enough free storage to remove metadata \u{2014} scrubbing needs about twice \
+                 the file size of free space in app storage. Encrypt or decrypt instead.",
+            );
+            2
+        }
+        Err(CryptoError::FileTooLarge { size_gb, max_gb }) => {
+            let _ = env.throw_new(
+                EXCEPTION_CLASS,
+                format!(
+                    "This file is too large to scrub on this device ({size_gb:.2} GB, limit \
+                     {max_gb:.2} GB). Encryption and decryption still work for it."
+                ),
             );
             2
         }
@@ -853,6 +921,11 @@ fn fs_create_private(path: &std::path::Path) -> io::Result<File> {
 /// keep both original `ParcelFileDescriptor`s open until this returns. The
 /// input is staged through the app-private cache directory (never fully held
 /// in RAM); temporary files are deleted on every exit path.
+///
+/// `source_size` is the input fd's reported size, used for the free-space
+/// pre-flight so an oversized file is rejected before anything is written.
+/// `report_listener` must implement `ScrubReportListener.onScrubReport(
+/// String, String, long, long)`; it is called once on success.
 #[no_mangle]
 pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nativeScrub(
     mut env: JNIEnv,
@@ -860,7 +933,9 @@ pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nat
     input_fd: jint,
     output_fd: jint,
     cache_dir: jni::objects::JString,
+    source_size: jlong,
     progress_listener: JObject,
+    report_listener: JObject,
     cancel_flag: JObject,
 ) -> jint {
     let res = panic::catch_unwind(AssertUnwindSafe(|| {
@@ -880,7 +955,9 @@ pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nat
             input_fd,
             output_fd,
             &dir_cstr,
+            source_size,
             &progress_listener,
+            &report_listener,
             &cancel_flag,
         )
     }));
@@ -892,4 +969,74 @@ pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nat
             1
         }
     }
+}
+
+/// Pushes the structured scrub outcome to Kotlin so the UI can show what was
+/// removed (and post a completion notification) instead of only knowing that
+/// the operation returned successfully.
+fn report_to_java(
+    env: &mut JNIEnv,
+    listener: &JObject,
+    report: &neuron_encrypt_core::metadata::ScrubReport,
+) {
+    let Ok(format_name) = env.new_string(report.format.name()) else {
+        return;
+    };
+    let Ok(removed) = env.new_string(report.removed.join(", ")) else {
+        return;
+    };
+    let args = [
+        jni::objects::JValue::from(&format_name),
+        jni::objects::JValue::from(&removed),
+        jni::objects::JValue::Long(report.bytes_before as jlong),
+        jni::objects::JValue::Long(report.bytes_after as jlong),
+    ];
+    let _ = env.call_method(
+        listener,
+        "onScrubReport",
+        "(Ljava/lang/String;Ljava/lang/String;JJ)V",
+        &args,
+    );
+}
+
+/// JNI entry point for `NeuronEncryptNative.nativeScrubFormatName`.
+///
+/// # Safety
+///
+/// `header` must be a valid Java byte array belonging to the current JNI frame.
+/// Returns the detected format's display name, or `null` when the bytes carry
+/// no format this build can scrub. The Android UI uses this as a cheap
+/// pre-flight check so an unsupported pick is rejected before an output
+/// document is created (and deleted again).
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_neuronencrypt_app_NeuronEncryptNative_nativeScrubFormatName(
+    env: JNIEnv,
+    _class: JClass,
+    header: JByteArray,
+) -> jstring {
+    let unsupported: jstring = std::ptr::null_mut();
+    let res = panic::catch_unwind(AssertUnwindSafe(|| {
+        let Ok(len) = env.get_array_length(&header) else {
+            return unsupported;
+        };
+        if len <= 0 {
+            return unsupported;
+        }
+        let mut raw = vec![0i8; len as usize];
+        if env.get_byte_array_region(&header, 0, &mut raw).is_err() {
+            return unsupported;
+        }
+        let bytes: Vec<u8> = raw.iter().map(|&b| b as u8).collect();
+        match neuron_encrypt_core::metadata::detect_media_format(&bytes) {
+            // HEIC/HEIF is detected but has no structural scrubber yet, so it
+            // must read as "unsupported" here exactly as `scrub_file` treats it.
+            Some(neuron_encrypt_core::metadata::MediaFormat::Heif) | None => unsupported,
+            Some(format) => match env.new_string(format.name()) {
+                Ok(name) => name.into_raw(),
+                Err(_) => unsupported,
+            },
+        }
+    }));
+
+    res.unwrap_or(unsupported)
 }

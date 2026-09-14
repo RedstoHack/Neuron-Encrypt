@@ -2846,7 +2846,7 @@ dependencies = [
 
 [[package]]
 name = "neuron-encrypt"
-version = "2.1.2"
+version = "2.2.0"
 dependencies = [
  "aead",
  "aes-gcm-siv",

@@ -176,7 +176,7 @@ Guarantees:
 - **Cleaned copy by default** — `<name>.clean.<ext>` is written atomically beside your file; the original is untouched. In-place replacement and post-copy secure wipe are opt-in.
 - **Fail closed** — unrecognized formats return an explicit error. A scrubber that can't understand a structure aborts rather than emitting a possibly-broken file; every output is re-validated before it replaces anything.
 - **Payload integrity** — kept chunks/segments are copied byte-for-byte, so decoders see identical image/audio data. Tests verify pixels survive TIFF relocation and CRCs stay valid.
-- **Bounded memory on mobile** — the Android engine stages files through app-private cache storage with a fixed 1 MiB buffer; peak RAM does not grow with file size.
+- **Bounded memory on mobile** — the Android engine stages files through app-private cache storage with a fixed 1 MiB buffer, so audio/video scrubbing keeps peak RAM flat. Formats that must be parsed whole (images, PDFs, office docs) hold ~2x the file size in memory, so Android caps them at 64 MiB (desktop: 1 GiB) and reports "too large to scrub" instead of being killed.
 - **Not for HEIC yet** — HEIF/HEIC files are detected but rejected with guidance rather than riskily rewritten.
 
 ---

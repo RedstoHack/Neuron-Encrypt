@@ -43,10 +43,14 @@
         </activity>
 
         <!-- Foreground service for crypto operations. dataSync type is for
-             long-running file processing tasks. -->
+             long-running file processing tasks. stopWithTask stays false (the
+             default) so CryptoService.onTaskRemoved runs when the user swipes
+             the app out of Recents: it clears the notification of an idle
+             service instead of leaving it stuck in the shade. -->
         <service
             android:name=".CryptoService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
 
     </application>

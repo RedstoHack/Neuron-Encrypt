@@ -1,5 +1,12 @@
 package com.neuronencrypt.app.ui
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -13,6 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.neuronencrypt.app.BuildConfig
 import com.neuronencrypt.app.ui.theme.*
 
@@ -29,6 +38,32 @@ fun HomeScreen(
     // Stored in SharedPreferences so it only shows once per install.
     val prefs = remember { context.getSharedPreferences("neuron_encrypt_prefs", android.content.Context.MODE_PRIVATE) }
     var showOnboarding by remember { mutableStateOf(!prefs.getBoolean("onboarding_seen", false)) }
+
+    // ---- Android 13+ notification permission ----
+    // Declaring POST_NOTIFICATIONS in the manifest is not enough: the runtime
+    // permission is denied by default, and a denied notification hides the
+    // foreground-service notice completely. A long scrub then runs invisibly in
+    // the background (and is reaped more aggressively), which users experience
+    // as "scrub hung" or "the notification never appeared".
+    var notificationsAllowed by remember { mutableStateOf(notificationsEnabled(context)) }
+    var notificationBannerDismissed by remember { mutableStateOf(false) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        prefs.edit().putBoolean("notif_prompt_done", true).apply()
+        notificationsAllowed = granted && notificationsEnabled(context)
+    }
+    // Ask once, and only after onboarding, so the two dialogs never stack.
+    LaunchedEffect(showOnboarding, notificationsAllowed) {
+        if (!showOnboarding &&
+            !notificationsAllowed &&
+            !prefs.getBoolean("notif_prompt_done", false) &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        ) {
+            prefs.edit().putBoolean("notif_prompt_done", true).apply()
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     if (showOnboarding) {
         AlertDialog(
@@ -88,6 +123,21 @@ fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        if (!notificationsAllowed && !notificationBannerDismissed) {
+            NotificationPermissionBanner(
+                onAllow = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        openNotificationSettings(context)
+                    }
+                },
+                onOpenSettings = { openNotificationSettings(context) },
+                onDismiss = { notificationBannerDismissed = true }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
         // Badge
         Surface(
             color = Accent.copy(alpha = 0.12f),
@@ -206,5 +256,78 @@ fun HomeScreen(
                 }
             }
         )
+    }
+}
+
+/** Whether the app is currently allowed to post notifications. */
+private fun notificationsEnabled(context: Context): Boolean {
+    val permissionGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    } else {
+        true
+    }
+    return permissionGranted && NotificationManagerCompat.from(context).areNotificationsEnabled()
+}
+
+/** Opens this app's notification settings screen (best effort). */
+private fun openNotificationSettings(context: Context) {
+    try {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(android.net.Uri.fromParts("package", context.packageName, null))
+        }
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: Exception) {
+        // Some OEM builds ship no matching settings activity.
+    }
+}
+
+/**
+ * Explains why the notification permission matters: it is what keeps a long
+ * scrub (the slowest operation, since it copies and rewrites the whole file)
+ * alive and visible once the app goes to the background.
+ */
+@Composable
+private fun NotificationPermissionBanner(
+    onAllow: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        color = Warning.copy(alpha = 0.10f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Warning, RoundedCornerShape(8.dp))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                "Notifications are off",
+                color = Warning,
+                style = MaterialTheme.typography.labelLarge
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Progress for long scrubs and encryptions is shown there. Without it, " +
+                    "Android may kill a job that keeps running in the background.",
+                color = TextMed,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onAllow) {
+                    Text("ALLOW", color = Accent, fontFamily = JetBrainsMonoFamily)
+                }
+                TextButton(onClick = onOpenSettings) {
+                    Text("SETTINGS", color = TextMed, fontFamily = JetBrainsMonoFamily)
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("DISMISS", color = TextLo, fontFamily = JetBrainsMonoFamily)
+                }
+            }
+        }
     }
 }

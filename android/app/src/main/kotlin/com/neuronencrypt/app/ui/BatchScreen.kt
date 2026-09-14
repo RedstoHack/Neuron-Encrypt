@@ -36,6 +36,7 @@ import com.neuronencrypt.app.*
 import com.neuronencrypt.app.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -48,7 +49,9 @@ data class BatchItem(
     var status: String = "Pending",
     var progress: Float = 0f,
     var error: String? = null,
-    var isWiped: Boolean = false
+    var isWiped: Boolean = false,
+    /** Scrub outcome summary (format + what was removed), empty otherwise. */
+    var detail: String = ""
 )
 
 sealed class BatchStatus {
@@ -78,6 +81,13 @@ fun BatchScreen(onBack: () -> Unit) {
 
     var batchStatus by remember { mutableStateOf<BatchStatus>(BatchStatus.Idle) }
     val cancelFlag = remember { AtomicBoolean(false) }
+
+    // Leaving the screen mid-batch latches the cancel flag so the native worker
+    // stops at its next chunk boundary instead of being abandoned mid-write (the
+    // JNI call itself cannot be interrupted).
+    DisposableEffect(Unit) {
+        onDispose { cancelFlag.set(true) }
+    }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -128,12 +138,8 @@ fun BatchScreen(onBack: () -> Unit) {
                     FileMode.Decrypt -> "Decrypting"
                     FileMode.Scrub -> "Removing metadata from"
                 }
-                val serviceIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                    setAction(com.neuronencrypt.app.CryptoService.ACTION_START)
-                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, "Batch ($total files)")
-                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
-                }
-                androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+                CryptoService.setOperationInFlight(true)
+                CryptoService.start(context, action, "Batch ($total files)")
 
                 var lastNotifyMs = 0L
                 try {
@@ -153,12 +159,30 @@ fun BatchScreen(onBack: () -> Unit) {
                             defaultOutputName(fileMode, item.name)
                         }
 
+                        // Pre-flight scrub support *before* creating the output
+                        // document: unsupported files are skipped without the
+                        // create-then-delete churn on the destination provider.
+                        if (fileMode == FileMode.Scrub) {
+                            val fmt = withContext(Dispatchers.IO) {
+                                scrubFormatName(context.contentResolver, item.uri)
+                            }
+                            if (fmt == null) {
+                                item.status = "Skipped"
+                                item.error = "Unsupported format - no metadata scrubber, file untouched"
+                                continue
+                            }
+                        }
+
                         var outUri: Uri? = null
                         try {
                             outUri = DocumentsContract.createDocument(
                                 context.contentResolver,
                                 parentDocUri,
-                                "*/*",
+                                if (fileMode == FileMode.Encrypt) {
+                                    "application/octet-stream"
+                                } else {
+                                    mimeTypeForOutputName(defaultName)
+                                },
                                 defaultName
                             )
 
@@ -177,19 +201,41 @@ fun BatchScreen(onBack: () -> Unit) {
                                         if (now - lastNotifyMs >= 250L) {
                                             lastNotifyMs = now
                                             val progress = (fraction * 100).toInt().coerceIn(0, 100)
-                                            val updateIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                                                setAction(com.neuronencrypt.app.CryptoService.ACTION_UPDATE)
-                                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, item.name as String)
-                                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
-                                                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_PROGRESS, progress)
-                                            }
-                                            androidx.core.content.ContextCompat.startForegroundService(context, updateIntent)
+                                            // In-process notification update: no
+                                            // service start per tick (that armed
+                                            // the platform's startForeground()
+                                            // timeout on every callback).
+                                            CryptoService.updateProgress(
+                                                context,
+                                                action,
+                                                item.name,
+                                                progress
+                                            )
                                         }
                                     }
                                 }
                             }
 
-                            val code = withContext(Dispatchers.IO) {
+                            var reportSummary = ""
+                            val reportListener = object : ScrubReportListener {
+                                override fun onScrubReport(
+                                    format: String,
+                                    removed: String,
+                                    bytesBefore: Long,
+                                    bytesAfter: Long
+                                ) {
+                                    reportSummary = if (removed.isBlank()) {
+                                        "$format: no removable metadata found"
+                                    } else {
+                                        "$format: removed $removed"
+                                    }
+                                }
+                            }
+
+                            // NonCancellable: the JNI call cannot be interrupted,
+                            // so navigation-away latches cancelFlag (see the
+                            // DisposableEffect) instead of abandoning the write.
+                            val code = withContext(Dispatchers.IO + NonCancellable) {
                                 when (fileMode) {
                                     FileMode.Encrypt -> encrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
                                     FileMode.Decrypt -> decrypt(context.contentResolver, item.uri, outUri, passwordBytes, listener, cancelFlag)
@@ -198,6 +244,7 @@ fun BatchScreen(onBack: () -> Unit) {
                                         item.uri,
                                         outUri,
                                         context.cacheDir.absolutePath,
+                                        reportListener,
                                         listener,
                                         cancelFlag
                                     )
@@ -206,6 +253,7 @@ fun BatchScreen(onBack: () -> Unit) {
 
                             if (code == 0) {
                                 item.status = "Success"
+                                item.detail = if (fileMode == FileMode.Scrub) reportSummary else ""
                             } else {
                                 deleteDocumentQuietly(context, outUri)
                                 item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
@@ -220,6 +268,17 @@ fun BatchScreen(onBack: () -> Unit) {
                             // Re-raise so cancelled coroutines never mark files as
                             // failed or delete outputs after the fact.
                             throw e
+                        } catch (e: NeuronEncryptException) {
+                            // Native failures carry the precise reason (unsupported
+                            // format, not enough scratch space, too large to
+                            // scrub, storage I/O) which the return code cannot.
+                            outUri?.let { deleteDocumentQuietly(context, it) }
+                            item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
+                            item.error = if (cancelFlag.get()) {
+                                "Cancelled"
+                            } else {
+                                e.message ?: "Operation failed"
+                            }
                         } catch (e: Exception) {
                             outUri?.let { deleteDocumentQuietly(context, it) }
                             item.status = if (cancelFlag.get()) "Cancelled" else "Failed"
@@ -227,15 +286,14 @@ fun BatchScreen(onBack: () -> Unit) {
                         }
                     }
                 } finally {
-                    // Clear passwords and stop the foreground service on every exit path
+                    // Clear passwords and stop the foreground service on every
+                    // exit path - now that no native call is still running.
                     java.util.Arrays.fill(passwordBytes, 0)
                     password = ""
                     confirmPassword = ""
                     cancelFlag.set(false)
-                    val stopIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                        setAction(com.neuronencrypt.app.CryptoService.ACTION_STOP)
-                    }
-                    context.stopService(stopIntent)
+                    CryptoService.setOperationInFlight(false)
+                    CryptoService.stop(context)
                 }
                 batchStatus = BatchStatus.Done(items)
             }
@@ -616,6 +674,13 @@ fun BatchScreen(onBack: () -> Unit) {
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    if (item.detail.isNotBlank()) {
+                                        Text(
+                                            text = item.detail,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextMed
+                                        )
+                                    }
                                     if (item.error != null) {
                                         Text(
                                             text = item.error!!,

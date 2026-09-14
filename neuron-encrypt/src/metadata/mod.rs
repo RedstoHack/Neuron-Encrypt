@@ -114,6 +114,17 @@ pub enum ScrubOutput {
 const SCRUB_READ_HEADER_LEN: usize = 64;
 /// In-memory rewrite cap for format families that need whole-file parsing.
 /// Media containers (audio/video) go through streaming rewriters instead.
+///
+/// The image/PDF/OOXML scrubbers hold **two** full-size buffers at once
+/// (source bytes plus the rebuilt output), so peak allocation is roughly 2x
+/// the file size. Desktop can afford the 1 GiB ceiling; Android cannot, and an
+/// oversized file there is killed by `lmkd` before any of our error handling
+/// runs. Mobile therefore gets a much tighter ceiling so oversized inputs fail
+/// loudly (and cheaply) instead of taking the process - and the foreground
+/// service notification - down with them.
+#[cfg(target_os = "android")]
+const IN_MEMORY_SCRUB_CAP: u64 = 64 * 1024 * 1024; // 64 MiB
+#[cfg(not(target_os = "android"))]
 const IN_MEMORY_SCRUB_CAP: u64 = 1_073_741_824; // 1 GiB
 
 /// Sniff the media format from leading magic bytes. Returns `None` for
@@ -175,9 +186,19 @@ pub fn detect_media_format(header: &[u8]) -> Option<MediaFormat> {
     // ISO-BMFF family: box size at 0..4, "ftyp" at 4..8, brand at 8..12.
     if &header[4..8] == b"ftyp" {
         let brand = &header[8..12];
-        const MP4_BRANDS: [&[u8; 4]; 10] = [
+        // Only brands that are unambiguously ISO-BMFF *and* handled by the
+        // lofty-based media scrubber. HEIF/HEIC brands are matched separately
+        // below and rejected (no structural scrubber yet), so they must stay
+        // out of this list.
+        const MP4_BRANDS: [&[u8; 4]; 28] = [
             b"isom", b"iso2", b"mp41", b"mp42", b"avc1", b"M4A ", b"M4V ", b"qt  ", b"dash",
             b"MSNV",
+            // Newer ISO base-media file format versions (modern phone cameras).
+            b"iso5", b"iso6", b"iso7", b"iso8", b"iso9", b"isoa", b"isob",
+            // 3GPP / 3GPP2 mobile video (the default on many Android phones).
+            b"3gp4", b"3gp5", b"3gp6", b"3gp7", b"3gp8", b"3ge6", b"3gg6", b"3g2a",
+            // Apple audio/video books and Sony MV.
+            b"M4B ", b"M4P ", b"mqv ",
         ];
         if MP4_BRANDS.iter().any(|b| *b == brand) {
             return Some(MediaFormat::Mp4);
@@ -341,8 +362,10 @@ pub fn scrub_file(
             }
             MediaFormat::Bmp => {
                 // BMP carries no standard embedded metadata; a validated no-op
-                // copy is the correct behaviour.
-                out.write_all(&read_all_capped(src, source_len)?)?;
+                // copy is the correct behaviour. Streamed rather than read into
+                // memory so a large BMP is bounded by the chunk buffer instead
+                // of the in-memory scrub cap.
+                copy_streaming(src, &mut out, cancel_flag)?;
                 Vec::new()
             }
             MediaFormat::Jpeg
@@ -417,4 +440,30 @@ fn read_all_capped(path: &Path, len: u64) -> CryptoResult<Vec<u8>> {
         });
     }
     fs::read(path).map_err(Into::into)
+}
+
+/// Chunked copy used by no-op scrub paths (BMP). Keeps peak memory flat and
+/// honours the caller's cancellation flag at chunk boundaries.
+fn copy_streaming(
+    src: &Path,
+    dest: &mut fs::File,
+    cancel_flag: Option<&Arc<AtomicBool>>,
+) -> CryptoResult<()> {
+    use std::io::Read;
+    const CHUNK: usize = 1024 * 1024;
+    let mut input = fs::File::open(src)?;
+    let mut buf = vec![0u8; CHUNK];
+    loop {
+        if let Some(flag) = cancel_flag {
+            if flag.load(Ordering::SeqCst) {
+                return Err(CryptoError::Cancelled);
+            }
+        }
+        let read = input.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        dest.write_all(&buf[..read])?;
+    }
+    Ok(())
 }

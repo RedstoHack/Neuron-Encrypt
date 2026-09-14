@@ -449,6 +449,33 @@ fn detects_mp4_and_heif_brands() {
 }
 
 #[test]
+fn detects_mobile_and_newer_iso_bmff_brands() {
+    // 3GPP/3GPP2 video and newer ISO-BMFF versions are what phone cameras
+    // actually produce; they scrub through the same lofty MP4 path.
+    for brand in [
+        b"3gp4".as_slice(),
+        b"3gp5".as_slice(),
+        b"3gp7".as_slice(),
+        b"3g2a".as_slice(),
+        b"iso5".as_slice(),
+        b"iso6".as_slice(),
+        b"M4B ".as_slice(),
+        b"mqv ".as_slice(),
+    ] {
+        let mut head = vec![0, 0, 0, 0x20];
+        head.extend_from_slice(b"ftyp");
+        head.extend_from_slice(brand);
+        head.extend_from_slice(b"\x00\x00\x02\x00isomiso2avc1mp41");
+        assert_eq!(
+            detect_media_format(&head),
+            Some(MediaFormat::Mp4),
+            "brand {:?} should be detected as MP4",
+            String::from_utf8_lossy(brand)
+        );
+    }
+}
+
+#[test]
 fn rejects_unknown_and_lookalike_formats() {
     assert_eq!(
         detect_media_format(b"II+\0\x08\x00\x00\x00\x00\x00\x00\x00"),

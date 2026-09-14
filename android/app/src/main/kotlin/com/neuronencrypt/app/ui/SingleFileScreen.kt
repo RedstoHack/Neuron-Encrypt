@@ -37,6 +37,7 @@ import com.neuronencrypt.app.*
 import com.neuronencrypt.app.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -52,7 +53,9 @@ sealed class ProcessStatus {
         val outputName: String,
         val durationMs: Long,
         val sizeBytes: Long,
-        val isWiped: Boolean = false
+        val isWiped: Boolean = false,
+        /** Scrub outcome summary (format + what was removed), empty otherwise. */
+        val detail: String = ""
     ) : ProcessStatus()
     data class Error(val message: String) : ProcessStatus()
     object Cancelled : ProcessStatus()
@@ -82,6 +85,18 @@ fun SingleFileScreen(
     var status by remember { mutableStateOf<ProcessStatus>(ProcessStatus.Idle) }
     val cancelFlag = remember { AtomicBoolean(false) }
 
+    // Scrub pre-flight: null format means "no scrubber for this file type".
+    var scrubFormat by rememberSaveable { mutableStateOf<String?>(null) }
+    var scrubChecked by rememberSaveable { mutableStateOf(false) }
+
+    // Leaving the screen mid-operation must cancel the native work rather than
+    // abandon it: the JNI call cannot be interrupted, so latch the cancel flag
+    // and let the worker stop at its next chunk boundary. The operation's own
+    // `finally` stops the service only after that call has returned.
+    DisposableEffect(Unit) {
+        onDispose { cancelFlag.set(true) }
+    }
+
     // Helpers to query info and magic
     fun selectFile(uri: Uri) {
         // Update the UI immediately; query the provider off the main thread so
@@ -92,12 +107,18 @@ fun SingleFileScreen(
             persistUriPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val info = getFileInfo(context, uri)
             val magic = detectMagicBytes(context, uri)
+            // Pre-flight the scrub format here: it decides whether the Scrub tab
+            // can run at all, and doing it now avoids creating (and then
+            // deleting) an output document for a file the core will refuse.
+            val scrubName = scrubFormatName(context.contentResolver, uri)
             withContext(Dispatchers.Main) {
                 // Ignore stale results if the user picked another file meanwhile
                 if (inputUri == uri) {
                     inputName = info.first
                     inputSize = info.second
                     detectedMagic = magic
+                    scrubFormat = scrubName
+                    scrubChecked = true
                     fileMode = if (magic == "VAULTX02" || magic == "VAULTX03" || magic == "VAULTX04") {
                         FileMode.Decrypt
                     } else {
@@ -123,63 +144,87 @@ fun SingleFileScreen(
         }
     }
 
+    // ACTION_CREATE_DOCUMENT through an explicit intent (instead of the
+    // CreateDocument contract) so each operation's output can be created with a
+    // real MIME type: outputs used to be "*/*", which providers record as
+    // application/octet-stream and gallery/media apps then ignore.
     val savePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("*/*")
-    ) { uri ->
-        if (uri != null && inputUri != null) {
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val outputUri = result.data?.data
+        if (result.resultCode == android.app.Activity.RESULT_OK &&
+            outputUri != null &&
+            inputUri != null
+        ) {
             cancelFlag.set(false)
             status = ProcessStatus.Running(0.0f, "Initializing...")
 
-            // Start ForegroundService to keep the process alive when backgrounded
+            // Foreground service for the duration of the operation so the
+            // process (and the native worker) survives backgrounding.
             val action = when (fileMode) {
                 FileMode.Encrypt -> "Encrypting"
                 FileMode.Decrypt -> "Decrypting"
                 FileMode.Scrub -> "Removing metadata from"
             }
-            val serviceIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                setAction(com.neuronencrypt.app.CryptoService.ACTION_START)
-                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName as String)
-                putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
-            }
-            androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+            CryptoService.setOperationInFlight(true)
+            CryptoService.start(context, action, inputName)
 
             scope.launch {
                 val startTime = System.currentTimeMillis()
                 val passwordBytes = password.toByteArray()
                 var lastNotifyMs = 0L
+                // Filled in by the native side on a successful scrub.
+                var scrubReport = ""
                 val listener = object : ProgressListener {
                     override fun onProgress(fraction: Float, stage: String) {
                         scope.launch {
                             status = ProcessStatus.Running(fraction, stage)
-                            // Throttle notification updates to avoid flooding the
-                            // main queue with a service start per progress tick
+                            // Notification updates are posted in-process; there
+                            // is no service start per tick any more (that armed
+                            // the platform's startForeground() timeout on every
+                            // progress callback and could resurrect a stopped
+                            // service).
                             val now = System.currentTimeMillis()
                             if (now - lastNotifyMs >= 250L) {
                                 lastNotifyMs = now
                                 val progress = (fraction * 100).toInt().coerceIn(0, 100)
-                                val updateIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                                    setAction(com.neuronencrypt.app.CryptoService.ACTION_UPDATE)
-                                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_FILENAME, inputName as String)
-                                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_ACTION, action as String)
-                                    putExtra(com.neuronencrypt.app.CryptoService.EXTRA_PROGRESS, progress)
-                                }
-                                androidx.core.content.ContextCompat.startForegroundService(context, updateIntent)
+                                CryptoService.updateProgress(context, action, inputName, progress)
                             }
+                        }
+                    }
+                }
+                val reportListener = object : ScrubReportListener {
+                    override fun onScrubReport(
+                        format: String,
+                        removed: String,
+                        bytesBefore: Long,
+                        bytesAfter: Long
+                    ) {
+                        scrubReport = if (removed.isBlank()) {
+                            "$format: no removable metadata found"
+                        } else {
+                            "$format: removed $removed"
                         }
                     }
                 }
 
                 try {
-                    // Run the native op on IO dispatcher to avoid blocking the main thread
-                    val code = withContext(Dispatchers.IO) {
+                    // NonCancellable: the JNI call cannot be interrupted, so a
+                    // navigation-away must not abandon it mid-write. Disposal
+                    // latches cancelFlag instead (see the DisposableEffect
+                    // above), which the native worker honours at its next chunk
+                    // boundary; the finally below stops the service only after
+                    // this call has actually returned.
+                    val code = withContext(Dispatchers.IO + NonCancellable) {
                         when (fileMode) {
-                            FileMode.Encrypt -> encrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
-                            FileMode.Decrypt -> decrypt(context.contentResolver, inputUri!!, uri, passwordBytes, listener, cancelFlag)
+                            FileMode.Encrypt -> encrypt(context.contentResolver, inputUri!!, outputUri, passwordBytes, listener, cancelFlag)
+                            FileMode.Decrypt -> decrypt(context.contentResolver, inputUri!!, outputUri, passwordBytes, listener, cancelFlag)
                             FileMode.Scrub -> scrub(
                                 context.contentResolver,
                                 inputUri!!,
-                                uri,
+                                outputUri,
                                 context.cacheDir.absolutePath,
+                                reportListener,
                                 listener,
                                 cancelFlag
                             )
@@ -199,13 +244,29 @@ fun SingleFileScreen(
                             inputName = inputName,
                             outputName = outputName,
                             durationMs = duration,
-                            sizeBytes = inputSize
+                            sizeBytes = inputSize,
+                            detail = if (fileMode == FileMode.Scrub) scrubReport else ""
+                        )
+                        // Tell a backgrounded user the operation finished; the
+                        // native report says what was removed.
+                        CryptoService.notifyCompleted(
+                            context,
+                            when (fileMode) {
+                                FileMode.Encrypt -> "Encrypted $outputName"
+                                FileMode.Decrypt -> "Decrypted $outputName"
+                                FileMode.Scrub -> "Metadata removed \u2014 $outputName"
+                            },
+                            if (fileMode == FileMode.Scrub) {
+                                scrubReport.ifBlank { "Clean copy written." }
+                            } else {
+                                formatSize(inputSize)
+                            }
                         )
                         // Clear fields
                         password = ""
                         confirmPassword = ""
                     } else {
-                        deleteDocumentQuietly(context, uri)
+                        deleteDocumentQuietly(context, outputUri)
                         if (cancelFlag.get()) {
                             status = ProcessStatus.Cancelled
                         } else {
@@ -224,8 +285,19 @@ fun SingleFileScreen(
                     // finished) output file in place is up to the caller. The
                     // finally block below still stops the service.
                     throw e
+                } catch (e: NeuronEncryptException) {
+                    // Native failures arrive as exceptions carrying the precise
+                    // reason ("Unsupported format ...", "Not enough free storage
+                    // ...", "too large to scrub ..."), which the return-code
+                    // branches above cannot see.
+                    deleteDocumentQuietly(context, outputUri)
+                    if (cancelFlag.get()) {
+                        status = ProcessStatus.Cancelled
+                    } else {
+                        status = ProcessStatus.Error(e.message ?: "Operation failed")
+                    }
                 } catch (e: Exception) {
-                    deleteDocumentQuietly(context, uri)
+                    deleteDocumentQuietly(context, outputUri)
                     if (cancelFlag.get()) {
                         status = ProcessStatus.Cancelled
                     } else {
@@ -237,11 +309,10 @@ fun SingleFileScreen(
                     password = ""
                     confirmPassword = ""
                     cancelFlag.set(false)
-                    // Stop the foreground service
-                    val stopIntent = Intent(context, com.neuronencrypt.app.CryptoService::class.java).apply {
-                        setAction(com.neuronencrypt.app.CryptoService.ACTION_STOP)
-                    }
-                    context.stopService(stopIntent)
+                    // Foreground service is stopped only now that the native
+                    // call has returned (see NonCancellable above).
+                    CryptoService.setOperationInFlight(false)
+                    CryptoService.stop(context)
                 }
             }
         }
@@ -399,13 +470,19 @@ fun SingleFileScreen(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = "No passphrase needed \u2014 scrubbing removes EXIF/GPS, XMP, ID3 tags and document properties.",
+                                    text = when {
+                                        !scrubChecked -> "Checking this file's format..."
+                                        scrubFormat != null ->
+                                            "Detected: $scrubFormat \u2014 no passphrase needed. Scrubbing removes EXIF/GPS, XMP, ID3 tags and document properties."
+                                        else ->
+                                            "No metadata scrubber for this file type (HEIC/HEIF and unknown formats are not supported). Encrypt or decrypt it instead."
+                                    },
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = TextMed
+                                    color = if (scrubChecked && scrubFormat == null) Error else TextMed
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Writes <name>.clean.<ext> beside the original. Unknown formats are rejected \u2014 nothing is modified on failure.",
+                                    text = "Writes <name>.clean.<ext> to the location you pick. Nothing is modified on failure.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextLo
                                 )
@@ -504,9 +581,15 @@ fun SingleFileScreen(
                     Spacer(modifier = Modifier.height(32.dp))
 
                     // Execute Button
-                    val isEnabled = fileMode == FileMode.Scrub ||
-                            (password.length >= 8 &&
-                            (fileMode == FileMode.Decrypt || (password == confirmPassword)))
+                    // Scrub needs a format the core can actually handle, and the
+                    // pre-flight already told us - so the button is disabled with
+                    // an explanation instead of failing after the user has picked
+                    // a destination.
+                    val isEnabled = when (fileMode) {
+                        FileMode.Scrub -> !scrubChecked || scrubFormat != null
+                        else -> password.length >= 8 &&
+                            (fileMode == FileMode.Decrypt || password == confirmPassword)
+                    }
 
                     Button(
                         onClick = {
@@ -515,7 +598,18 @@ fun SingleFileScreen(
                             } else {
                                 defaultOutputName(fileMode, inputName)
                             }
-                            savePickerLauncher.launch(defaultName)
+                            // Create the output with a real MIME type so media
+                            // apps pick scrubbed/decrypted files up immediately.
+                            val mime = when (fileMode) {
+                                FileMode.Encrypt -> "application/octet-stream"
+                                else -> mimeTypeForOutputName(defaultName)
+                            }
+                            savePickerLauncher.launch(
+                                Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                    type = mime
+                                    putExtra(Intent.EXTRA_TITLE, defaultName)
+                                }
+                            )
                         },
                         enabled = isEnabled,
                         modifier = Modifier
@@ -652,6 +746,9 @@ fun SingleFileScreen(
                             DetailRow(label = "Source", value = success.inputName)
                             DetailRow(label = "Output", value = success.outputName)
                             DetailRow(label = "Size", value = formatSize(success.sizeBytes))
+                            if (success.detail.isNotBlank()) {
+                                DetailRow(label = "Metadata", value = success.detail)
+                            }
 
                             val seconds = success.durationMs / 1000f
                             val speed = if (seconds > 0) formatSize((success.sizeBytes / seconds).toLong()) + "/s" else "N/A"

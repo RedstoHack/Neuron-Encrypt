@@ -142,9 +142,15 @@ external fun nativeEncrypt(
 
 external fun nativeDecrypt(...): Int
 external fun nativeScrub(
-    inputFd: Int, outputFd: Int, cacheDir: String,
-    listener: ProgressListener, cancelFlag: AtomicBoolean
+    inputFd: Int, outputFd: Int, cacheDir: String, sourceSize: Long,
+    listener: ProgressListener, reportListener: ScrubReportListener,
+    cancelFlag: AtomicBoolean
 ): Int
+
+// Pre-flight: returns the detected format name ("JPEG", "PDF", ...) or null
+// when the core has no scrubber for these bytes (unknown format, plain zip,
+// BigTIFF, HEIC/HEIF).
+external fun nativeScrubFormatName(header: ByteArray): String?
 ```
 
 ### Kotlin Wrapper
@@ -155,7 +161,8 @@ fun encrypt(contentResolver: ContentResolver, inputUri: Uri, outputUri: Uri,
 fun decrypt(...): Int
 fun scrub(
     contentResolver: ContentResolver, inputUri: Uri, outputUri: Uri,
-    cacheDir: String, listener: ProgressListener, cancelFlag: AtomicBoolean
+    cacheDir: String, reportListener: ScrubReportListener,
+    listener: ProgressListener, cancelFlag: AtomicBoolean
 ): Int
 ```
 

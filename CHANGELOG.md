@@ -5,6 +5,23 @@ All notable changes to Neuron Encrypt are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Android: notification permission was never requested.** `POST_NOTIFICATIONS` was declared in the manifest but not asked for at runtime, so on Android 13+ the foreground-service notification was dropped silently and long operations ran invisibly in the background (where they are reaped more aggressively). The home screen now requests it once after onboarding and shows a banner with a settings shortcut when denied.
+- **Android: progress updates re-armed the foreground-service start timeout.** Every throttled tick called `startForegroundService()` while the service's `ACTION_UPDATE` branch never called `startForeground()` — which the platform treats as a fatal error (`ForegroundServiceDidNotStartInTimeException`) and which could resurrect a stopped service with no notification. Updates now post in-process via `CryptoService.updateProgress()` (no service start per tick), and every `onStartCommand` branch enters the foreground state.
+- **Android: the ongoing notification could get stuck.** `ACTION_STOP` was unreachable (`stopService()` does not deliver intents) and the service had no `onTaskRemoved`, so swiping the app out of Recents left a permanent "Removing metadata…" entry. `onDestroy` now removes the notification, `onTaskRemoved` stops an idle service, and an in-flight flag keeps a *running* operation from being torn down.
+- **Android: leaving a screen mid-operation abandoned the write.** The service was stopped while the un-interruptible native call kept running, so the process could be killed mid-write with no foreground protection. Navigating away now latches the cancel flag, the native dispatch runs under `NonCancellable`, and the service stops only after the call returns.
+- **Android: scrub failed with a generic "Storage I/O failed" on large files.** The free-space check ran *after* the input had already been staged and used `f_bsize` instead of `f_frsize`. Space is now verified against the fd's reported size *before* anything is written, and failures surface as actionable messages ("Not enough free storage — scrubbing needs about twice the file size…").
+- **Android: large images/PDFs could get the process killed by the OS.** Image/PDF/OOXML scrubbing holds two full-size buffers, so oversized inputs were killed by `lmkd` (taking the notification with them). Android caps in-memory scrubbing at 64 MiB (desktop stays at 1 GiB) with a clear "too large to scrub on this device" error, and BMP "no-op" copies are streamed instead of buffered.
+- **Android: scrub errors were mis-reported.** The UI keyed off native return codes while the JNI always throws `NeuronEncryptException`, so its code-based messages (e.g. "Unsupported format — skipped") were unreachable. The screens now handle the exception and show the native reason.
+- **Android: scrubbed/decrypted outputs were created as `*/*`.** Providers recorded them as `application/octet-stream`, so cleaned photos stayed invisible to gallery/media apps. Outputs are now created with a MIME derived from the destination name.
+
+### Changed
+- **Android: scrub pre-flight.** Files are sniffed against the core's magic-byte table (`nativeScrubFormatName`) when picked: unsupported formats (unknown types, plain zips, BigTIFF, HEIC/HEIF) disable the Scrub tab with an explanation, and batch mode skips them without creating then deleting output documents.
+- **Android: scrub results are surfaced.** The native `ScrubReport` (format + removed categories) now reaches the UI through `ScrubReportListener` — shown on the success screen, in the batch list, and in a new dismissible completion notification.
+- **Scrub coverage: mobile video containers.** The MP4/MOV detector now accepts the 3GPP/3GPP2 brands (`3gp4`…`3gp8`, `3ge6`, `3gg6`, `3g2a`), newer ISO base-media versions (`iso5`…`isob`) and `M4B`/`M4P`/`mqv`, so the video formats phone cameras actually produce scrub through the existing lofty path instead of being rejected. HEIC/HEIF remains explicitly unsupported (fail-closed) until structural scrubbing lands.
+
 ## [2.2.0] — 2026-08-23
 
 ### Added
