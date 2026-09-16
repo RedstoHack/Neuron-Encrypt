@@ -39,14 +39,15 @@ build-android-apk:
     - echo "Building Android JNI libs (4 ABIs)..."
     - chmod +x android/build-rust.sh
     - ./android/build-rust.sh
-    - echo "Assembling APK..."
+    - echo "Assembling release APK (fdroid flavor — unsigned)..."
     - cd android
     - export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
     - export PATH="$JAVA_HOME/bin:$PATH"
-    - ./gradlew :app:assembleStandardDebug --no-daemon
+    # fdroidRelease = minified + ProGuard, no signing config (F-Droid signs it themselves)
+    - ./gradlew :app:assembleFdroidRelease --no-daemon
   artifacts:
     paths:
-      - android/app/build/outputs/apk/standard/debug/app-standard-debug.apk
+      - android/app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
     expire_in: "30 days"
 
 package-android:
@@ -55,11 +56,15 @@ package-android:
   image: alpine:3.20
   script:
     - apk add --no-cache curl
-    - cp android/app/build/outputs/apk/standard/debug/app-standard-debug.apk .
-    - sha256sum neuron-encrypt-*-android.apk > SHA256SUMS-android.txt
+    # Read version from Cargo.toml (source of truth for all platforms)
+    - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
+    - APK_NAME="neuron-encrypt-${VERSION}-android.apk"
+    # Rename the Gradle output to a consistent versioned name
+    - cp android/app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk "$APK_NAME"
+    - sha256sum "$APK_NAME" > SHA256SUMS-android.txt
     - cat SHA256SUMS-android.txt
-    # Permanent product link (generic package registry - never expires)
-    - bash .gitlab/ci/publish-android.sh
+    # Upload to Package Registry (permanent, never expires)
+    - bash .gitlab/ci/publish-android.sh "$APK_NAME" "$VERSION"
   artifacts:
     paths:
       - neuron-encrypt-*-android.apk
