@@ -1,6 +1,8 @@
 use std::fs;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use clap::{CommandFactory, Parser, Subcommand};
@@ -301,6 +303,34 @@ enum ExitCode {
     RuntimeError = 1,
     BadInput = 2,
     WrongPassword = 3,
+    /// Interrupted by the user (128 + SIGINT, the shell convention).
+    Interrupted = 130,
+}
+
+/// Latched by the Ctrl-C handler.
+///
+/// The first Ctrl-C asks for a graceful stop: the operation unwinds through the
+/// core's cancellation checks, so scratch files are removed and no half-written
+/// output is left behind. A second Ctrl-C exits immediately, accepting that a
+/// `*.tmp` file may survive - the user is in a hurry.
+static INTERRUPT_FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+/// Shared cancellation flag for all operations, created once per process.
+fn interrupt_flag() -> Arc<AtomicBool> {
+    INTERRUPT_FLAG
+        .get_or_init(|| {
+            let flag = Arc::new(AtomicBool::new(false));
+            let handler_flag = Arc::clone(&flag);
+            // If the handler cannot be installed we keep the default signal
+            // behaviour instead of failing the command.
+            let _ = ctrlc::set_handler(move || {
+                if handler_flag.swap(true, Ordering::SeqCst) {
+                    std::process::exit(ExitCode::Interrupted as i32);
+                }
+            });
+            flag
+        })
+        .clone()
 }
 
 fn resolve_output(input_path: &Path, mode: &str, output_arg: &Option<String>) -> PathBuf {
@@ -574,6 +604,7 @@ fn run_file(
     let reporter = setup_reporter(show_progress, source_size);
     let throttled = ThrottledReporter::new(reporter.as_ref());
 
+    let interrupt = interrupt_flag();
     let result = if mode == "encrypt" {
         crypto::encrypt_file(
             &input_path,
@@ -581,7 +612,7 @@ fn run_file(
             cli.force,
             password,
             &throttled,
-            None,
+            Some(&interrupt),
         )
     } else {
         crypto::decrypt_file(
@@ -590,7 +621,7 @@ fn run_file(
             cli.force,
             password,
             &throttled,
-            None,
+            Some(&interrupt),
         )
     };
 
@@ -637,6 +668,21 @@ fn run_file(
                 }
             }
             Ok(())
+        }
+        // run_stream: piped decrypt path
+        // run_file Cancelled arm
+        Err(CryptoError::Cancelled) => {
+            let msg = "Cancelled by user. No output file was written.";
+            emit_error_json(
+                cli.json,
+                &start,
+                Some(output_path.display().to_string()),
+                msg,
+            );
+            if !cli.json {
+                eprintln!("X {msg}");
+            }
+            Err(ExitCode::Interrupted)
         }
         Err(CryptoError::DecryptionFailed) => {
             let msg = "Wrong passphrase or corrupted file.";
@@ -802,6 +848,15 @@ fn run_stream(
             }
             Ok(())
         }
+        Err(CryptoError::Cancelled) => {
+            let msg = "Cancelled by user. No output file was written.";
+            emit_error_json(cli.json, &start, None, msg);
+            if !cli.json {
+                eprintln!("X {msg}");
+            }
+            Err(ExitCode::Interrupted)
+        }
+
         Err(CryptoError::DecryptionFailed) => {
             let msg = "Wrong passphrase or corrupted file.";
             emit_error_json(cli.json, &start, None, msg);
@@ -873,7 +928,7 @@ fn run_scrub(
         mode,
         wipe_original,
         reporter.as_ref(),
-        None,
+        Some(&interrupt_flag()),
     );
 
     match result {
@@ -929,6 +984,14 @@ fn run_scrub(
                 eprintln!("\u{2713} Complete ({:.2}s)", elapsed as f64 / 1000.0);
             }
             Ok(())
+        }
+        Err(CryptoError::Cancelled) => {
+            let msg = "Cancelled by user. The source file was left untouched.";
+            emit_error_json(cli.json, &start, None, msg);
+            if !cli.json {
+                eprintln!("\u{2717} {msg}");
+            }
+            Err(ExitCode::Interrupted)
         }
         Err(CryptoError::UnsupportedMediaFormat(reason)) => {
             let msg = format!("Unsupported format \u{2014} {reason}. File left unmodified.");

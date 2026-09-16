@@ -26,13 +26,7 @@ fn main() {
         let out_dir = std::env::var("OUT_DIR").unwrap_or_default();
         let res_path = format!("{out_dir}/app-icon.res");
         let compiled = Command::new("windres")
-            .args([
-                "app.rc",
-                "-O",
-                "coff",
-                "-o",
-                res_path.as_str(),
-            ])
+            .args(["app.rc", "-O", "coff", "-o", res_path.as_str()])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .status()
             .map(|s| s.success())

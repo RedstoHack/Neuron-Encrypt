@@ -287,15 +287,60 @@ fn validate_scrub_output(tmp: &Path, format: MediaFormat) -> CryptoResult<()> {
     Ok(())
 }
 
+/// Persist the scrubbed scratch file at `dest`, replacing an existing file in a
+/// single step when necessary.
+///
+/// In-place scrubbing (`dest == src`) must never leave a window where the
+/// original has been deleted but the replacement is not yet in place: the old
+/// remove-then-link sequence lost *both* copies when the second step failed
+/// (for example on filesystems without hard-link support such as exFAT, FAT,
+/// or SMB/NFS shares, where `persist_temp_file` then removes the scratch file
+/// as part of its own failure handling) and also on a crash between the two
+/// steps. `fs::rename` replaces the destination atomically on unix (`rename(2)`)
+/// and on windows (`MoveFileEx` with `MOVEFILE_REPLACE_EXISTING`), so the
+/// original is either fully there or fully replaced.
+///
+/// A *new* destination still goes through [`persist_temp_file`] so its
+/// create-new guarantee is preserved (validated earlier but re-checked here).
 fn persist_scratched(tmp: &Path, dest: &Path) -> CryptoResult<()> {
-    // Clear any existing destination first (in-place mode where dest == src,
-    // or Windows rename semantics). This must happen before the single
-    // persist attempt because persist_temp_file removes the scratch file on
-    // its own failure paths.
-    if fs::symlink_metadata(dest).is_ok() {
-        fs::remove_file(dest).map_err(CryptoError::from)?;
+    match fs::symlink_metadata(dest) {
+        Ok(_) => {
+            // A read-only destination cannot be replaced by rename on windows
+            // (access denied), so clear the flag for the swap and put it back
+            // on the replacement - the attribute the user chose survives.
+            #[cfg(windows)]
+            {
+                let meta = fs::symlink_metadata(dest)?;
+                if meta.permissions().readonly() {
+                    let mut cleared = meta.permissions();
+                    // Windows-specific: clear read-only for the atomic swap.
+                    // This is a no-op on Unix, so the clippy warning is a false
+                    // positive for this platform-guarded code.
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    cleared.set_readonly(false);
+                    fs::set_permissions(dest, cleared)?;
+                    let mut readonly = fs::metadata(tmp)?.permissions();
+                    // Windows-specific: restore the read-only attribute on the
+                    // replacement file after the atomic swap.
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    readonly.set_readonly(true);
+                    fs::set_permissions(tmp, readonly)?;
+                }
+            }
+            match fs::rename(tmp, dest) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    let _ = fs::remove_file(tmp);
+                    Err(error.into())
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => persist_temp_file(tmp, dest),
+        Err(error) => {
+            let _ = fs::remove_file(tmp);
+            Err(error.into())
+        }
     }
-    persist_temp_file(tmp, dest)
 }
 
 /// Remove all known metadata from the file at `src`.
@@ -339,7 +384,12 @@ pub fn scrub_file(
                 explicit.unwrap_or_else(|| src.with_file_name(default_scrub_output_name(src)));
             crate::crypto::validate_destination_path_public(src, &candidate, false)?
         }
-        ScrubOutput::InPlace => src.to_path_buf(),
+        ScrubOutput::InPlace => {
+            // Resolve symlinks so an in-place scrub rewrites the *target* file
+            // and leaves the link intact, instead of replacing the link itself
+            // with a regular file.
+            fs::canonicalize(src)?
+        }
     };
 
     reporter.report(
@@ -412,6 +462,19 @@ pub fn scrub_file(
         if flag.load(Ordering::SeqCst) {
             let _ = fs::remove_file(&tmp);
             return Err(CryptoError::Cancelled);
+        }
+    }
+
+    // In-place replacement: keep the original file's permission bits, so a
+    // world-readable photo does not silently become 0600 merely because the
+    // scratch file is created private. Only the classic permission bits are
+    // copied; setuid/setgid/sticky are dropped, as any in-place editor would.
+    #[cfg(unix)]
+    if mode == ScrubOutput::InPlace {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(&dest) {
+            let bits = meta.permissions().mode() & 0o777;
+            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(bits));
         }
     }
 

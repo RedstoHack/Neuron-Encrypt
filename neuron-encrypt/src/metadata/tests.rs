@@ -973,6 +973,132 @@ fn in_place_replaces_source_atomically() {
 }
 
 #[test]
+fn in_place_leaves_no_scratch_files_behind() {
+    let dir = tmp_dir("inplace-scratch");
+    let src = write_file(&dir, "pic.jpg", &jpeg_fixture(true));
+
+    scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+
+    // Only the scrubbed source may remain; a stranded `*.tmp` here would mean
+    // the two-step replace ran (and could have lost the original on failure).
+    let leftovers: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != "pic.jpg")
+        .collect();
+    assert!(leftovers.is_empty(), "leftover files: {leftovers:?}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn in_place_preserves_permission_bits() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tmp_dir("inplace-perms");
+    let src = write_file(&dir, "shared.jpg", &jpeg_fixture(true));
+    std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+
+    let mode = std::fs::metadata(&src).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o644,
+        "in-place scrub rewrote permissions to {mode:o}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[cfg(windows)]
+#[test]
+fn in_place_preserves_read_only_attribute() {
+    let dir = tmp_dir("inplace-readonly");
+    let src = write_file(&dir, "ro.jpg", &jpeg_fixture(true));
+    let mut perms = std::fs::metadata(&src).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&src, perms).unwrap();
+
+    let report = scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+    assert_eq!(report.format, MediaFormat::Jpeg);
+
+    assert!(
+        std::fs::metadata(&src).unwrap().permissions().readonly(),
+        "read-only attribute was dropped by the in-place replace"
+    );
+    let out = std::fs::read(&src).unwrap();
+    assert!(find(&out, EVIL_CAMERA).is_none(), "source was not scrubbed");
+
+    let mut writable = std::fs::metadata(&src).unwrap().permissions();
+    writable.set_readonly(false);
+    std::fs::set_permissions(&src, writable).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn in_place_through_symlink_updates_target_and_keeps_link() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tmp_dir("inplace-symlink");
+    let target = write_file(&dir, "real.jpg", &jpeg_fixture(true));
+    let link = dir.join("link.jpg");
+    symlink(&target, &link).unwrap();
+
+    let report = scrub_file(
+        &link,
+        None,
+        ScrubOutput::InPlace,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap();
+    assert_eq!(report.format, MediaFormat::Jpeg);
+
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the symlink was replaced by a regular file"
+    );
+    let out = std::fs::read(&target).unwrap();
+    assert!(find(&out, EVIL_CAMERA).is_none(), "target was not scrubbed");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn in_place_failure_keeps_original_intact() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tmp_dir("inplace-ro-dir");
+    let src = write_file(&dir, "pic.jpg", &jpeg_fixture(true));
+    let original = std::fs::read(&src).unwrap();
+    // A read-only directory blocks scratch-file creation before anything can
+    // touch the source, so the failure path must leave the file untouched.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+    let err = scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap_err();
+    assert!(
+        matches!(err, CryptoError::Io(_)),
+        "unexpected error: {err:?}"
+    );
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(
+        std::fs::read(&src).unwrap(),
+        original,
+        "original was modified by a failed in-place scrub"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn wipe_original_removes_source_in_copy_mode() {
     let dir = tmp_dir("wipe");
     let src = write_file(&dir, "gone.jpg", &jpeg_fixture(true));

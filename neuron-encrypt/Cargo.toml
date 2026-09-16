@@ -60,6 +60,11 @@ default = ["metadata"]
 metadata = ["dep:lopdf", "dep:zip", "dep:lofty"]
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
+# Ctrl-C handling for the CLI: an interrupted operation unwinds through the
+# core's cancellation checks (which delete scratch files and never leave a
+# half-written output) instead of being killed with a `*.tmp` behind it.
+# Desktop/CLI only - not compiled for Android.
+ctrlc = "3"
 open = "5"
 image = "0.25"
 eframe = { version = "0.33", features = ["default"] }
