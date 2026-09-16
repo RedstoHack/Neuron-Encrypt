@@ -47,6 +47,7 @@ rand_core   = { version = "0.6",  features = ["getrandom"] }
 thiserror   = "1.0.61"
 crossbeam-channel = "0.5"
 hex = "0.4.3"
+subtle = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

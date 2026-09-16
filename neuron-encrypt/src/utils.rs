@@ -1,34 +1,8 @@
-/// Compare two byte slices in constant time **within a fixed input length**.
-///
-/// # ⚠️ Limitations
-/// - The loop iterates `max(a.len(), b.len())` times, which leaks the longer
-///   input's length through timing. Do NOT use this to compare a secret
-///   (e.g., HMAC tag, session token) against an attacker-controlled input.
-/// - For comparing a secret against untrusted input, use `subtle::ConstantTimeEq`
-///   from the RustCrypto `subtle` crate instead.
-///
-/// The current call sites only compare two user-typed passwords during the
-/// "confirm passphrase" prompt, where both inputs are user-supplied and the
-/// length leak is harmless.
+use subtle::ConstantTimeEq;
+
+/// Compare two byte slices in constant time.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    let len_a = a.len();
-    let len_b = b.len();
-    let max_len = len_a.max(len_b);
-
-    let mut byte_comparison_result = 0;
-
-    for i in 0..max_len {
-        let byte_a = a.get(i).unwrap_or(&0);
-        let byte_b = b.get(i).unwrap_or(&0);
-        byte_comparison_result |= byte_a ^ byte_b;
-    }
-
-    let len_diff = len_a ^ len_b;
-    let len_mismatch_flag = (((len_diff | len_diff.wrapping_neg()) >> (usize::BITS - 1)) & 1) as u8;
-
-    let final_result = byte_comparison_result | len_mismatch_flag;
-
-    final_result == 0
+    a.ct_eq(b).into()
 }
 
 pub fn is_vx2_file(path: &std::path::Path) -> bool {

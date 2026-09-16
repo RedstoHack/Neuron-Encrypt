@@ -416,6 +416,8 @@ pub fn scrub_file(
                 // memory so a large BMP is bounded by the chunk buffer instead
                 // of the in-memory scrub cap.
                 copy_streaming(src, &mut out, cancel_flag)?;
+                out.sync_all()?;
+                drop(out);
                 Vec::new()
             }
             MediaFormat::Jpeg
@@ -426,12 +428,16 @@ pub fn scrub_file(
                 let data = read_all_capped(src, source_len)?;
                 let (cleaned, removed) = images::scrub_image(format, &data)?;
                 out.write_all(&cleaned)?;
+                out.sync_all()?;
+                drop(out);
                 removed
             }
             MediaFormat::Pdf | MediaFormat::Ooxml => {
                 let data = read_all_capped(src, source_len)?;
                 let (cleaned, removed) = documents::scrub_document(format, &data)?;
                 out.write_all(&cleaned)?;
+                out.sync_all()?;
+                drop(out);
                 removed
             }
             MediaFormat::Mp3
@@ -440,7 +446,11 @@ pub fn scrub_file(
             | MediaFormat::Wav
             | MediaFormat::Mp4 => {
                 drop(out);
-                media::scrub_media_file(src, &tmp)?
+                let removed = media::scrub_media_file(src, &tmp)?;
+                if let Ok(f) = fs::File::open(&tmp) {
+                    let _ = f.sync_all();
+                }
+                removed
             }
         };
 

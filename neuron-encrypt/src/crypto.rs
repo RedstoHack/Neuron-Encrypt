@@ -311,8 +311,8 @@ pub(crate) fn validate_destination_path(
     }
 
     match fs::symlink_metadata(&canonical_dest) {
-        Ok(_) if overwrite => fs::remove_file(&canonical_dest)?,
-        Ok(_) => return Err(CryptoError::FileAlreadyExists(canonical_dest)),
+        Ok(_) if !overwrite => return Err(CryptoError::FileAlreadyExists(canonical_dest)),
+        Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
@@ -336,42 +336,29 @@ fn read_limited_file(file: fs::File, limit: u64) -> std::io::Result<Vec<u8>> {
     Ok(buffer)
 }
 
-pub(crate) fn persist_temp_file(tmp: &Path, dest: &Path) -> CryptoResult<()> {
-    #[cfg(unix)]
+pub fn persist_temp_file(tmp: &Path, dest: &Path) -> CryptoResult<()> {
+    #[cfg(windows)]
     {
-        match fs::hard_link(tmp, dest) {
-            Ok(()) => {
-                let _ = fs::remove_file(tmp);
-                Ok(())
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let _ = fs::remove_file(tmp);
-                Err(CryptoError::FileAlreadyExists(dest.to_path_buf()))
-            }
-            Err(error) => {
-                let _ = fs::remove_file(tmp);
-                Err(error.into())
+        if let Ok(meta) = fs::symlink_metadata(dest) {
+            if meta.permissions().readonly() {
+                let mut cleared = meta.permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
+                cleared.set_readonly(false);
+                let _ = fs::set_permissions(dest, cleared);
             }
         }
     }
 
-    #[cfg(not(unix))]
-    {
-        match fs::rename(tmp, dest) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let _ = fs::remove_file(tmp);
-                Err(CryptoError::FileAlreadyExists(dest.to_path_buf()))
-            }
-            Err(error) => {
-                let _ = fs::remove_file(tmp);
-                Err(error.into())
-            }
+    match fs::rename(tmp, dest) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(tmp);
+            Err(error.into())
         }
     }
 }
 
-pub(crate) fn tmp_path(dest: &Path) -> PathBuf {
+pub fn tmp_path(dest: &Path) -> PathBuf {
     let mut rng_bytes = [0u8; 8];
     OsRng.fill_bytes(&mut rng_bytes);
     let suffix = hex::encode(rng_bytes);
@@ -1077,7 +1064,13 @@ fn decrypt_file_streaming_v4(
 /// WARNING: This is not cryptographically guaranteed on SSDs, APFS, Btrfs, ZFS,
 /// or NTFS with shadow copies enabled.
 pub fn secure_wipe(path: &Path) -> CryptoResult<()> {
-    let metadata = match fs::symlink_metadata(path) {
+    let canonical = match fs::canonicalize(path) {
+        Ok(c) => c,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+
+    let metadata = match fs::metadata(&canonical) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
@@ -1087,7 +1080,7 @@ pub fn secure_wipe(path: &Path) -> CryptoResult<()> {
     }
 
     let len = metadata.len();
-    let mut file = fs::OpenOptions::new().write(true).open(path)?;
+    let mut file = fs::OpenOptions::new().write(true).open(&canonical)?;
 
     let mut buffer = vec![0u8; 64 * 1024];
     for _ in 0..3 {
@@ -1113,26 +1106,39 @@ pub fn secure_wipe(path: &Path) -> CryptoResult<()> {
 
     drop(file);
 
+    let mut renamed = false;
     for _ in 0..8 {
         let mut random_name = [0u8; 16];
         OsRng.fill_bytes(&mut random_name);
-        let renamed_path = path.with_file_name(hex::encode(random_name));
+        let renamed_path = canonical.with_file_name(hex::encode(random_name));
 
-        match fs::rename(path, &renamed_path) {
+        match fs::rename(&canonical, &renamed_path) {
             Ok(()) => {
-                fs::remove_file(renamed_path)?;
-                return Ok(());
+                fs::remove_file(&renamed_path)?;
+                renamed = true;
+                break;
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error.into()),
         }
     }
 
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "failed to generate a unique wipe filename",
-    )
-    .into())
+    if !renamed {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "failed to generate a unique wipe filename",
+        )
+        .into());
+    }
+
+    // If source was a distinct symlink pointing to the wiped file, remove the link too
+    if let Ok(sym_meta) = fs::symlink_metadata(path) {
+        if sym_meta.file_type().is_symlink() {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    Ok(())
 }
 
 /// Stream-encrypt from any reader to any writer.
@@ -1677,6 +1683,38 @@ mod tests {
         assert!(result.is_ok());
         assert!(dest_path.exists());
         assert_ne!(fs::read(&dest_path).unwrap(), b"already here");
+
+        let _ = fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn test_encrypt_file_overwrite_failure_preserves_original_destination() {
+        let tmp_dir = unique_test_dir();
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let src_path = tmp_dir.join("src.txt");
+        let dest_path = tmp_dir.join("dest.vx2");
+        let original_data = b"precious existing destination data";
+        fs::write(&src_path, b"secret").unwrap();
+        fs::write(&dest_path, original_data).unwrap();
+
+        let cancel = Arc::new(AtomicBool::new(true)); // immediate cancel
+        let reporter = TestReporter;
+
+        let result = encrypt_file(
+            &src_path,
+            &dest_path,
+            true, // overwrite = true
+            b"validpass123",
+            &reporter,
+            Some(&cancel),
+        );
+        assert!(matches!(result, Err(CryptoError::Cancelled)));
+        assert_eq!(
+            fs::read(&dest_path).unwrap(),
+            original_data,
+            "Destination file was deleted or corrupted on cancelled overwrite"
+        );
 
         let _ = fs::remove_dir_all(tmp_dir);
     }

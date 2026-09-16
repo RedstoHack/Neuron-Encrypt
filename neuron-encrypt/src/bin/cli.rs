@@ -14,7 +14,7 @@ use neuron_encrypt_core::metadata;
 use neuron_encrypt_core::utils::{constant_time_eq, is_vx2_file, HumanBytes};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
@@ -156,12 +156,14 @@ fn read_password(
         return Ok(bytes);
     }
 
-    if let Ok(pw) = std::env::var("NEURON_PASSWORD") {
+    if let Ok(mut pw) = std::env::var("NEURON_PASSWORD") {
         eprintln!(
             "[WARN] NEURON_PASSWORD is set: password is visible in /proc/<pid>/environ \n       and may appear in shell history or process monitors."
         );
         eprintln!("[WARN] Prefer --password-file with a 0600-permission file for sensitive use.");
-        return Ok(Zeroizing::new(pw.into_bytes()));
+        let bytes = Zeroizing::new(pw.as_bytes().to_vec());
+        pw.zeroize();
+        return Ok(bytes);
     }
 
     loop {
@@ -821,16 +823,53 @@ fn run_stream(
                 &throttled,
             )
         } else if let Some(path) = output_str.as_deref() {
-            let mut out = match fs::File::create(path) {
+            let dest_path = Path::new(path);
+            let tmp = crypto::tmp_path(dest_path);
+            let mut out = match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+            {
                 Ok(f) => f,
                 Err(e) => {
-                    let msg = format!("Cannot open output: {e}");
+                    let msg = format!("Cannot open temporary output: {e}");
                     emit_error_json(cli.json, &start, Some(path.to_owned()), &msg);
                     eprintln!("Error: {msg}");
                     return Err(ExitCode::BadInput);
                 }
             };
-            crypto::decrypt_stream(&mut reader, &mut out, password, source_size, &throttled)
+            let stream_res = crypto::decrypt_stream(
+                &mut reader,
+                &mut out,
+                password,
+                source_size,
+                &throttled,
+            );
+            match stream_res {
+                Ok(()) => {
+                    if let Err(e) = out.sync_all() {
+                        let _ = fs::remove_file(&tmp);
+                        let msg = format!("Cannot flush output file: {e}");
+                        emit_error_json(cli.json, &start, Some(path.to_owned()), &msg);
+                        eprintln!("Error: {msg}");
+                        return Err(ExitCode::RuntimeError);
+                    }
+                    drop(out);
+                    if let Err(e) = crypto::persist_temp_file(&tmp, dest_path) {
+                        let _ = fs::remove_file(&tmp);
+                        let msg = format!("Cannot save output file: {e}");
+                        emit_error_json(cli.json, &start, Some(path.to_owned()), &msg);
+                        eprintln!("Error: {msg}");
+                        return Err(ExitCode::RuntimeError);
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    drop(out);
+                    let _ = fs::remove_file(&tmp);
+                    Err(e)
+                }
+            }
         } else {
             let msg = "Output path is required when decrypting piped input unless -o - is set.";
             emit_error_json(cli.json, &start, None, msg);
