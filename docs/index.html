@@ -471,6 +471,28 @@
           </a>
         </div>
 
+        <!-- ── One-line Quick Install ──────────────────────────────────────── -->
+        <div class="quick-install reveal" aria-label="One-line install commands">
+          <p class="quick-install-label">Quick install</p>
+          <div class="qi-row">
+            <span class="qi-badge">Linux / macOS</span>
+            <div class="cli-head qi-head">
+              <span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span>
+              <code id="qi-linux" class="qi-code">curl -fsSL https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh | sh</code>
+              <button class="copy-button" type="button" id="qi-copy-linux" data-copy="curl -fsSL https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh | sh" aria-label="Copy Linux install command">Copy</button>
+            </div>
+          </div>
+          <div class="qi-row">
+            <span class="qi-badge qi-badge-win">Windows</span>
+            <div class="cli-head qi-head">
+              <span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span>
+              <code id="qi-win" class="qi-code">irm https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1 | iex</code>
+              <button class="copy-button" type="button" id="qi-copy-win" data-copy="irm https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1 | iex" aria-label="Copy Windows install command">Copy</button>
+            </div>
+          </div>
+          <p class="qi-note">Verifies SHA-256 automatically · installs to PATH · no account required. <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/docs/install.sh" target="_blank" rel="noopener">View source</a></p>
+        </div>
+
         <div class="install-tabs reveal">
           <div class="tabs small" role="tablist" aria-label="Install instructions by OS">
             <button class="tab active" role="tab" aria-selected="true" aria-controls="inst-linux" id="instab-linux" type="button">Linux</button>

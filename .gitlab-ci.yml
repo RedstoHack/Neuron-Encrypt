@@ -6,12 +6,17 @@
 stages:
   - build
   - deploy
+  - release
 
 pages:
   stage: deploy
   script:
     - mkdir -p public
     - cp -r docs/. public/
+    # Write latest-version.txt so install.sh / install.ps1 can resolve the
+    # current version without hard-coding it.
+    - grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2 > public/latest-version.txt
+    - echo "Pages: latest-version.txt -> $(cat public/latest-version.txt)"
   artifacts:
     paths:
       - public
@@ -20,6 +25,8 @@ pages:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
         - docs/**/*
+        - neuron-encrypt/Cargo.toml
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - when: manual
       allow_failure: false
 
@@ -51,3 +58,59 @@ android:
   trigger:
     include: .gitlab/ci/android.yml
     strategy: depend
+
+# ── GitLab Release (fires automatically on every vX.Y.Z tag) ──────────────────
+create-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  variables:
+    VERSION: "$CI_COMMIT_TAG"   # e.g. v2.2.0
+  script:
+    # Strip leading "v" for the package registry version string
+    - VER="${VERSION#v}"
+    - PROJ="${CI_PROJECT_URL}"
+    - API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic"
+    - echo "Creating release for $VERSION (package version $VER)"
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "Neuron Encrypt $CI_COMMIT_TAG"
+    description: |
+      See [CHANGELOG.md](${CI_PROJECT_URL}/-/blob/main/CHANGELOG.md) for details.
+
+      ### One-line install
+
+      **Linux / macOS**
+      ```sh
+      curl -fsSL https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh | sh
+      ```
+
+      **Windows (PowerShell)**
+      ```powershell
+      irm https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1 | iex
+      ```
+
+      ### Direct binary downloads
+
+      See the [Package Registry](${CI_PROJECT_URL}/-/packages) for all platform archives.
+    assets:
+      links:
+        - name: "Linux x86_64 CLI binary"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${CI_COMMIT_TAG#v}/neuron-encrypt-cli-${CI_COMMIT_TAG#v}-linux-x86_64"
+          link_type: "package"
+        - name: "Windows x86_64 CLI binary (.exe)"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${CI_COMMIT_TAG#v}/neuron-encrypt-cli-${CI_COMMIT_TAG#v}-windows-x86_64.exe"
+          link_type: "package"
+        - name: "Linux x86_64 full archive (.tar.gz)"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${CI_COMMIT_TAG#v}/neuron-encrypt-${CI_COMMIT_TAG#v}-linux-x86_64.tar.gz"
+          link_type: "package"
+        - name: "Windows x86_64 full archive (.zip)"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${CI_COMMIT_TAG#v}/neuron-encrypt-${CI_COMMIT_TAG#v}-windows-x86_64.zip"
+          link_type: "package"
+        - name: "install.sh (Linux/macOS one-liner)"
+          url: "https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh"
+          link_type: "runbook"
+        - name: "install.ps1 (Windows one-liner)"
+          url: "https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1"
+          link_type: "runbook"

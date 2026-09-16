@@ -86,9 +86,26 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 | ⌨️ Windows CLI | Standalone x86_64 `.exe` | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/neuron-encrypt-cli-2.2.0-windows-x86_64.exe) |
 | ⌨️ macOS CLI | Standalone Intel binary | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/neuron-encrypt-cli-2.2.0-macos-x86_64) |
 
-**No account is required.** The GUI+CLI archives and standalone CLI binaries are published through GitLab’s Generic Package Registry, so users do not need a Cargo account, GitHub account, or GitHub sign-in. The Linux and Windows CLI links above are live for version `2.2.0`; the macOS link becomes live when the macOS packaging job publishes its archive.
+**No account is required.** The GUI+CLI archives and standalone CLI binaries are published through GitLab's Generic Package Registry, so users do not need a Cargo account, GitHub account, or GitHub sign-in. The Linux and Windows CLI links above are live for version `2.2.0`; the macOS link becomes live when the macOS packaging job publishes its archive.
 
-For Linux, install the standalone CLI into your user path:
+### One-line install (recommended)
+
+**Linux / macOS** — downloads the binary, verifies SHA-256, and adds it to your PATH:
+
+```sh
+curl -fsSL https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh | sh
+```
+
+**Windows (PowerShell)** — downloads, verifies, installs to `%LOCALAPPDATA%\Programs\NeuronEncrypt\bin`, and updates your User PATH:
+
+```powershell
+irm https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1 | iex
+```
+
+Both scripts verify the SHA-256 hash before running. [View the Linux installer source](https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/docs/install.sh) · [View the Windows installer source](https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/docs/install.ps1)
+
+<details>
+<summary>Manual install (Linux — curl + sha256sum)</summary>
 
 ```bash
 VERSION=2.2.0
@@ -101,8 +118,7 @@ install -Dm755 "$CLI_FILE" "$HOME/.local/bin/neuron-encrypt-cli"
 neuron-encrypt-cli --help
 ```
 
-
-On Windows, download the `.exe` link and run `neuron-encrypt-cli-2.2.0-windows-x86_64.exe --help`. Its checksum is available at [SHA256SUMS-cli-windows.txt](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/SHA256SUMS-cli-windows.txt). On macOS Intel, download the macOS CLI link when it is published, run `chmod +x neuron-encrypt-cli-2.2.0-macos-x86_64`, and execute it with `./neuron-encrypt-cli-2.2.0-macos-x86_64 --help`. Apple Silicon users should use the macOS archive until a native universal CLI package is published.
+</details>
 
 **Verify your download:** SHA-256 hashes are published with each package and in the [release notes](https://gitlab.com/theredhacker0345/neuron-encrypt/releases). Standalone CLI checksums are published beside the binaries as `SHA256SUMS-cli-linux.txt`, `SHA256SUMS-cli-windows.txt`, and `SHA256SUMS-cli-macos.txt` when the corresponding platform package is published.
 

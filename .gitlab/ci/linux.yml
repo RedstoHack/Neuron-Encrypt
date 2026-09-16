@@ -76,6 +76,15 @@ package-linux:
       curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
         --upload-file SHA256SUMS-cli-linux.txt \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-linux.txt"
+      # ── 'latest' alias (install.sh resolves without knowing version) ──────────
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file "$CLI_NAME" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/latest/neuron-encrypt-cli-latest-linux-x86_64" \
+        || echo "WARN: latest alias upload failed (registry disabled?)"
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file SHA256SUMS-cli-linux.txt \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/latest/SHA256SUMS-cli-linux.txt" \
+        || true
     - |
       curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" \
         --upload-file SHA256SUMS-linux.txt \
