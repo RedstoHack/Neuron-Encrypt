@@ -51,38 +51,32 @@ ENV ANDROID_NDK_ROOT=/opt/android-sdk/ndk/26.1.10909125
 # Install cargo-ndk
 RUN cargo install cargo-ndk --locked --version 4.1.2
 
-# Install osxcross for macOS cross-compilation
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    xz-utils \
-    python3 \
-    libxml2-utils \
-    && rm -rf /var/lib/apt/lists/*
+# osxcross for macOS cross-compilation is NOT installed here.
+#
+# It was previously built into this image, which meant a ~2 GB SDK download and
+# a long toolchain build for anyone who only wanted the Android cross-compile.
+# The macOS CLI cross-build now lives in .gitlab/ci/macos.yml, where it is
+# cached and runs only for release tags. Build that image if you need to
+# reproduce a macOS binary locally.
 
-RUN git clone --depth=1 https://github.com/tpoechtrager/osxcross.git /opt/osxcross && \
-    cd /opt/osxcross && \
-    # Download macOS SDK
-    wget -q https://github.com/phracker/MacOSX-SDKs/releases/download/13.3/MacOSX13.3.sdk.tar.xz -O tarballs/MacOSX13.3.sdk.tar.xz && \
-    UNATTENDED=1 ./build.sh && \
-    rm -rf tarballs
-
-ENV PATH="/opt/osxcross/target/bin:$PATH"
-ENV SDKROOT=/opt/osxcross/target/SDK/MacOSX13.3.sdk
-
-# Install Rust targets
+# Install Rust targets.
+#
+# No x86_64-apple-darwin here: without osxcross the std for that target cannot
+# be linked on Linux, so installing it would only be misleading. The macOS CLI
+# cross-build lives in .gitlab/ci/macos.yml.
 RUN rustup component add rustfmt clippy && \
     rustup target add \
     x86_64-unknown-linux-gnu \
     x86_64-pc-windows-gnu \
-    x86_64-apple-darwin \
     aarch64-linux-android \
     armv7-linux-androideabi \
     x86_64-linux-android \
     i686-linux-android
 
-# Install cargo tools
-RUN cargo install cargo-ndk --locked --version 4.1.2 && \
-    cargo install cargo-audit --locked && \
-    cargo install cargo-deny --locked
+# Install cargo tools.
+RUN cargo install cargo-deny --locked
+# cargo-audit is deliberately absent: CI fetches the prebuilt musl binary (see
+# the quality job in .gitlab-ci.yml), which avoids compiling ~200 crates.
 
 WORKDIR /workspace
 

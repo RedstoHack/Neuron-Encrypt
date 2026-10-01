@@ -1,0 +1,40 @@
+# Keep the build context small. Without this, a local `target/` directory
+# (multi-gigabyte after a release build) is uploaded to the daemon on every
+# `docker build`, and any target/ or .gradle/ present in the context is also
+# visible to the COPY steps.
+target/
+**/target/
+
+# Build outputs and caches
+dist/
+build/
+.gradle/
+.gradle-home/
+.cargo-home/
+.ci-android/
+
+# VCS and CI
+.git/
+.gitlab-ci.yml
+.gitlab/
+
+# Docs and site assets are not needed to compile the binaries
+docs/
+*.md
+!neuron-encrypt/README.md
+
+# F-Droid / Play metadata
+fastlane/
+metadata/
+
+# Installer sources (NSIS runs on Windows, not in this image)
+installer/
+
+# Android sources — the Rust JNI crate has its own build path
+android/
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store

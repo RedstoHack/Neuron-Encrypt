@@ -226,13 +226,26 @@ cd android && ./build-rust.sh
 ```
 
 ### Docker
-```bash
-# Builder image
-docker build -t neuron-encrypt-builder -f Dockerfile.builder .
 
-# Runtime image
+Two images, different purposes:
+
+- `Dockerfile.builder` — a **development** image carrying every toolchain: Rust,
+  Android SDK + NDK, osxcross (macOS cross-compile), mingw-w64 and wine
+  (Windows), JDK and Gradle. Multi-gigabyte. Use it to reproduce the Android
+  and macOS cross-builds locally. CI does the same work via
+  `.gitlab/ci/{android,macos}.yml`, so you rarely need it.
+- `Dockerfile` — a **runtime** image: release binaries copied into
+  `debian:bookworm-slim` as an unprivileged user. Its entrypoint is the CLI,
+  because the GUI is a windowed eframe app and cannot start without a display.
+
+```bash
+# Runtime image (CLI entrypoint)
 docker build -t neuron-encrypt -f Dockerfile .
-docker run --rm -v $(pwd)/data:/data neuron-encrypt encrypt -i /data/file.txt -o /data/file.vx2
+docker run --rm -v "$PWD/data:/data" neuron-encrypt \
+  encrypt -i /data/file.txt -o /data/file.vx2
+
+# The GUI binary is in the same image, but needs a mounted display and GL
+# libraries that the slim runtime does not install — it is not usable as-is.
 ```
 
 ---
