@@ -67,8 +67,11 @@ quality:
       - .cargo-home/
       - neuron-encrypt/target/
   before_script:
+    # curl is needed to fetch the prebuilt cargo-audit below; the slim Rust
+    # image does not ship it. ca-certificates is included because the
+    # rust:slim base has no CA bundle, and curl then fails with exit 77.
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends
-        pkg-config libssl-dev clang lld
+        pkg-config libssl-dev clang lld curl ca-certificates
     - rustup component add rustfmt clippy
     # Prebuilt cargo-audit. `cargo install cargo-audit` compiles ~200 crates and
     # was a large share of this job's wall clock. rustsec publishes
