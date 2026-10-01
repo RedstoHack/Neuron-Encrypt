@@ -459,7 +459,7 @@
           </a>
           <a class="platform-card magnetic reveal" data-os="macos" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
             <span class="platform-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 13.5c0-2.2 1.8-3.2 1.9-3.3a3.7 3.7 0 0 0-2.9-1.6c-1.2-.1-2.4.7-3 .7-.6 0-1.5-.7-2.5-.7a3.8 3.8 0 0 0-3.2 2c-1.4 2.4-.4 6 1 8 .7 1 1.4 2.1 2.4 2 1 0 1.3-.6 2.5-.6s1.5.6 2.5.6c1 0 1.7-1 2.4-2 .8-1.2 1.1-2.3 1.1-2.4-.1 0-2.2-.8-2.2-3.7Z"></path><path d="M14.5 6.2c.5-.6.8-1.4.7-2.2-.7 0-1.5.5-2 1.1-.4.5-.8 1.3-.7 2.1.8.1 1.6-.4 2-1Z"></path></svg></span>
-            <span class="platform-name">macOS</span><span class="platform-desc" translate="no">Intel archive · Apple Silicon best-effort</span><span class="platform-badge" translate="no">v2.3.0</span><span class="platform-arrow" aria-hidden="true">↗</span>
+            <span class="platform-name">macOS</span><span class="platform-desc" translate="no">CLI only · Intel, Apple Silicon via Rosetta 2</span><span class="platform-badge" translate="no">v2.3.0</span><span class="platform-arrow" aria-hidden="true">↗</span>
           </a>
           <a class="platform-card magnetic reveal" data-os="linux" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
             <span class="platform-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.4 3.1 7.6 8 9 4.9-1.4 8-4.6 8-9V7l-8-4Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg></span>
@@ -518,10 +518,15 @@ neuron-encrypt-cli-2.3.0-windows-x86_64.exe --help
 # SmartScreen warns on first run (unsigned) — click “Run anyway”.</code></pre>
           </div>
           <div class="cli-panel tab-panel" id="inst-macos" role="tabpanel" aria-labelledby="instab-macos" tabindex="0" hidden>
-            <div class="cli-head"><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="cli-title">macOS Intel — verify, then run</span><button class="copy-button" type="button" data-copy="chmod +x neuron-encrypt-cli-2.3.0-macos-x86_64&#10;./neuron-encrypt-cli-2.3.0-macos-x86_64 --help">Copy</button></div>
-<pre><code>chmod +x neuron-encrypt-cli-2.3.0-macos-x86_64
-./neuron-encrypt-cli-2.3.0-macos-x86_64 --help
-# Apple Silicon: use the macOS archive until a universal CLI ships.</code></pre>
+            <div class="cli-head"><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="cli-title">macOS — one-line install</span><button class="copy-button" type="button" data-copy="curl -fsSL https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh | sh&#10;neuron-encrypt-cli --version">Copy</button></div>
+<pre><code>curl -fsSL https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh | sh
+neuron-encrypt-cli --version
+# Apple Silicon: runs the Intel build under Rosetta 2.
+# No Rosetta? softwareupdate --install-rosetta
+#
+# CLI only — the desktop GUI is not shipped for macOS. It links AppKit and
+# Metal, so a binary cross-built on Linux cannot be signed, notarised or
+# tested on real hardware. Build it yourself on a Mac if you need the app.</code></pre>
           </div>
         </div>
         <p class="verify-note reveal">Always verify: compare the <span translate="no">SHA-256</span> in the release notes against your download before running it. Checksums ship beside every binary.</p>

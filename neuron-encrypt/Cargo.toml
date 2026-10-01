@@ -31,6 +31,10 @@ path = "src/lib.rs"
 [[bin]]
 name = "neuron-encrypt"
 path = "src/main.rs"
+# GUI-only binary. Without this, building with `--no-default-features` (the
+# headless CLI configuration used to cross-compile for macOS) would still try to
+# compile eframe/egui and fail on the missing AppKit/Metal frameworks.
+required-features = ["gui"]
 
 [[bin]]
 name = "neuron-encrypt-cli"
@@ -57,8 +61,14 @@ zip          = { version = "8.6", default-features = false, features = ["deflate
 lofty        = { version = "0.25", optional = true }
 
 [features]
-default = ["metadata"]
+default = ["metadata", "gui"]
 metadata = ["dep:lopdf", "dep:zip", "dep:lofty"]
+# The desktop GUI stack. Kept behind a feature so the CLI can be cross-compiled
+# headlessly (notably for macOS, where eframe pulls in AppKit/Metal and cannot
+# be cross-linked from Linux without a full macOS SDK). The CLI uses none of
+# these crates, so `--no-default-features --features metadata` yields a CLI that
+# depends on nothing platform-specific.
+gui = ["dep:eframe", "dep:egui", "dep:rfd", "dep:image", "dep:open"]
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # Ctrl-C handling for the CLI: an interrupted operation unwinds through the
@@ -66,16 +76,19 @@ metadata = ["dep:lopdf", "dep:zip", "dep:lofty"]
 # half-written output) instead of being killed with a `*.tmp` behind it.
 # Desktop/CLI only - not compiled for Android.
 ctrlc = "3"
-open = "5"
-image = "0.25"
-eframe = { version = "0.33", features = ["default"] }
-egui = "0.33"
-rfd = "0.15"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 indicatif = "0.18.4"
 rpassword = "7"
 tempfile = "3"
+
+# GUI-only. `open` is used by the desktop GUI to reveal a file in the system
+# file manager, and the image/rfd/eframe/egui stack is the windowing layer.
+open = { version = "5", optional = true }
+image = { version = "0.25", optional = true }
+eframe = { version = "0.33", features = ["default"], optional = true }
+egui = { version = "0.33", optional = true }
+rfd = { version = "0.15", optional = true }
 
 [lints.clippy]
 explicit_auto_deref = "allow"

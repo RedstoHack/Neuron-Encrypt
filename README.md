@@ -72,7 +72,7 @@ No account required — everything ships through GitLab's package registry.
 |----------|--------------|------|
 | 🐧 **Linux** | AppImage (no package manager) or `.tar.gz` with GUI + CLI | [Releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
 | 🪟 **Windows** | `.zip` with GUI + CLI | [Releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
-| 🍎 **macOS** | x86_64 archive with GUI + CLI | [Releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| 🍎 **macOS** | **CLI only** — Intel binary, see [macOS](#macos) below | [Releases](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
 
 ### CLI only
 
@@ -127,6 +127,33 @@ cargo build --release --locked --bin neuron-encrypt --bin neuron-encrypt-cli
 `-p neuron-encrypt-cli` selects just the CLI; the repository root is a workspace containing both binaries.
 
 </details>
+
+### macOS
+
+**The CLI is published for macOS. The desktop GUI is not.**
+
+The CLI binary is cross-compiled from Linux with [osxcross](https://github.com/tpoechtrager/osxcross) against the macOS 13.3 SDK. This works because the GUI stack is behind an optional `gui` feature — building with `--no-default-features --features metadata` yields a CLI that links no AppKit, Metal or CoreFoundation frameworks, so it cross-links from Linux cleanly.
+
+```sh
+# Apple Silicon and Intel alike; falls back to x86_64 under Rosetta 2.
+curl -fsSL https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh | sh
+neuron-encrypt-cli --version
+```
+
+**Why there is no `.app`:** the GUI is eframe/winit, which on macOS links against AppKit and Metal. A binary linked that way on Linux cannot be codesigned or notarised, and cannot be tested on real hardware from a Linux runner — so shipping one would mean handing you a file that Gatekeeper is likely to reject and that nobody has run. We would rather publish nothing than publish something we cannot stand behind.
+
+**To build the GUI on a Mac:**
+
+```sh
+git clone https://gitlab.com/theredhacker0345/neuron-encrypt.git
+cd neuron-encrypt/neuron-encrypt
+cargo build --release --bin neuron-encrypt
+./target/release/neuron-encrypt
+```
+
+An unsigned build runs locally; distribute it to other machines only after signing and notarising with your own Apple Developer ID.
+
+> Apple Silicon runs the published x86_64 CLI under Rosetta 2. If Rosetta is not installed, `softwareupdate --install-rosetta` enables it. A native `aarch64-apple-darwin` build needs the osxcross toolchain to be extended for that target and is not published yet.
 
 ### Android
 
@@ -277,15 +304,17 @@ All three are readable by v2.1+. New encryptions use V4. There is no auto-migrat
 </details>
 
 <details>
-<summary><b>Why is the Windows build not code-signed?</b></summary>
+<summary><b>Is macOS supported?</b></summary>
 
-Authenticode certificates cost $200–400/year. Until one is available, SmartScreen will warn on first run — click "Run anyway", and verify the SHA-256 hash published with the download.
+The **CLI** is — an Intel binary, cross-compiled and published with every release, installable with the same one-liner as Linux. Apple Silicon runs it under Rosetta 2.
+
+The **GUI** is not, and we are not shipping an unverifiable one. The desktop app links against AppKit and Metal, so a binary cross-linked from a Linux runner can be neither codesigned, nor notarised, nor tested on real hardware — and an unsigned `.app` is something Gatekeeper usually refuses. Build it yourself from source on your Mac if you want the windowed app; the exact command is in [macOS](#macos).
 </details>
 
 <details>
-<summary><b>Why is macOS Intel-only?</b></summary>
+<summary><b>Why is the Windows build not code-signed?</b></summary>
 
-macOS builds come from a maintainer runner; only x86_64 is currently published. Apple Silicon runs it under Rosetta 2.
+Authenticode certificates cost $200–400/year. Until one is available, SmartScreen will warn on first run — click "Run anyway", and verify the SHA-256 hash published with the download.
 </details>
 
 <details>

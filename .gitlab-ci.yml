@@ -25,10 +25,11 @@
 #      use a shared prefix, so a commit that quality already type-checked does
 #      not recompile from scratch in every platform job. See docs/CI_CD.md.
 #
-# The macOS job is gone. It required a self-hosted runner tagged `macos` that
-# does not exist, so it sat pending forever and could never produce an asset.
-# macOS binaries are still published to the package registry by a maintainer
-# with the appropriate runner.
+# The macOS job used to require a self-hosted runner tagged `macos` that does not
+# exist on this instance, so it sat pending forever and never produced an asset.
+# It now cross-compiles the CLI from Linux with osxcross, which works because the
+# GUI stack is behind the optional `gui` feature. The desktop GUI is still not
+# published for macOS — see .gitlab/ci/macos.yml.
 # =============================================================================
 
 stages:
@@ -171,6 +172,18 @@ android:
     include: .gitlab/ci/android.yml
     strategy: depend
 
+# CLI only, cross-compiled with osxcross. Replaces the old job that needed a
+# `macos` runner tag which does not exist on this instance and so sat pending
+# forever. See .gitlab/ci/macos.yml for why the GUI is not included.
+macos:
+  stage: build
+  needs: []
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  trigger:
+    include: .gitlab/ci/macos.yml
+    strategy: depend
+
 # -----------------------------------------------------------------------------
 # 3. Assemble the release
 # -----------------------------------------------------------------------------
@@ -188,7 +201,7 @@ create-release:
   image: alpine:3.20
   # `quality` is listed even though it runs in parallel with the builds: a
   # failed gate must stop the release even when all three platforms built fine.
-  needs: [quality, linux, windows, android]
+  needs: [quality, linux, windows, android, macos]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   variables:
@@ -237,7 +250,7 @@ create-release:
         add neuron-encrypt-cli "neuron-encrypt-cli-${VERSION}-linux-x86_64"
         add neuron-encrypt-cli "SHA256SUMS-cli-linux.txt"
 
-        # macOS CLI (published by a maintainer runner; absent is not fatal).
+        # macOS CLI, cross-compiled with osxcross.
         add neuron-encrypt-cli "neuron-encrypt-cli-${VERSION}-macos-x86_64"
         add neuron-encrypt-cli "SHA256SUMS-cli-macos.txt"
 

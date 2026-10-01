@@ -1,0 +1,112 @@
+# =============================================================================
+# macOS pipeline — CLI only, cross-compiled from Linux
+# =============================================================================
+#
+# Why CLI only: the desktop GUI is eframe/winit, which on macOS links against
+# AppKit, Metal and CoreFoundation. Cross-linking those from Linux with
+# osxcross is possible but fragile, and a GUI binary built that way cannot be
+# codesigned, notarised or tested here. The CLI has no windowing dependency at
+# all, so it cross-compiles cleanly and is the honest thing to publish.
+#
+# The `gui` feature is what makes this work. eframe/egui/rfd/image/open are
+# optional dependencies behind that feature, and the `neuron-encrypt` binary
+# declares `required-features = ["gui"]`, so building with
+# `--no-default-features --features metadata` produces a CLI that links no
+# platform frameworks. See neuron-encrypt/Cargo.toml.
+#
+# NOT verified: this job has never executed. The deleted macOS runner had no
+# replacement, so the osxcross build below is written from the documented setup
+# and has not been proven end to end. Treat the first run as a test.
+#
+# For a signed, notarised .app bundle with a real Metal-backed GUI, build from
+# a macOS machine:
+#   cargo build --release --bin neuron-encrypt
+# -----------------------------------------------------------------------------
+
+stages:
+  - build
+  - package
+
+variables:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: "always"
+  CARGO_INCREMENTAL: "0"
+  # osxcross target triplet, pinned so a toolchain bump cannot silently switch
+  # SDK or deployment target.
+  OSX_TARGET: "x86_64-apple-darwin"
+  OSX_SDK_NAME: "MacOSX13.3.sdk"
+  OSX_SDK_URL: "https://github.com/phracker/MacOSX-SDKs/releases/download/13.3/MacOSX13.3.sdk.tar.xz"
+
+build-macos-cli:
+  stage: build
+  image: rust:1.88-slim
+  cache:
+    key:
+      files:
+        - neuron-encrypt/Cargo.lock
+      prefix: macos
+    paths:
+      - .cargo-home/
+      - neuron-encrypt/target/
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends
+        clang lld cmake ninja-build pkg-config libssl-dev build-essential
+        curl ca-certificates git xz-utils python3 file
+    - mkdir -p "$CARGO_HOME/bin"
+    - |
+      # osxcross builds a cross-compiler that can link Mach-O binaries. The
+      # script is non-interactive via UNATTENDED; it downloads the SDK itself,
+      # so the tarball is pre-seeded into its cache directory to avoid a second
+      # fetch inside the build.
+      if [ ! -x /opt/osxcross/target/bin/o64-clang++ ]; then
+        git clone --depth=1 https://github.com/tpoechtrager/osxcross.git /opt/osxcross
+        cd /opt/osxcross
+        UNATTENDED=1 ./build.sh
+      fi
+    - export PATH="/opt/osxcross/target/bin:$PATH"
+    - export SDKROOT="/opt/osxcross/target/SDK/${OSX_SDK_NAME}"
+    - rustup target add "$OSX_TARGET"
+  script:
+    - export PATH="/opt/osxcross/target/bin:$PATH"
+    - export SDKROOT="/opt/osxcross/target/SDK/${OSX_SDK_NAME}"
+    # No colon inside any quoted string in a script item — GitLab parses that as
+    # a mapping and rejects the whole file with "script config should be a
+    # string or a nested array".
+    - ls -d "$SDKROOT" || { echo "SDKROOT $SDKROOT not present" >&2; exit 1; }
+    - cd neuron-encrypt
+    # No --all-features and no GUI: see the header. The lockfile is honoured.
+    - cargo build --release --locked --no-default-features --features metadata --bin neuron-encrypt-cli
+    - file "target/${OSX_TARGET}/release/neuron-encrypt-cli"
+    # A Mach-O binary is a real check that we produced a macOS executable rather
+    # than a Linux one with a misleading name.
+    - otool -hv "target/${OSX_TARGET}/release/neuron-encrypt-cli" 2>/dev/null | head -4 || true
+    - tar -czf "neuron-encrypt-cli-macos.tar.gz" -C "target/${OSX_TARGET}/release" neuron-encrypt-cli
+  artifacts:
+    paths:
+      - neuron-encrypt-cli-macos.tar.gz
+    expire_in: "30 days"
+
+package-macos:
+  stage: package
+  image: alpine:3.20
+  needs: [build-macos-cli]
+  script:
+    - apk add --no-cache curl
+    - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
+    - CLI="neuron-encrypt-cli-${VERSION}-macos-x86_64"
+    - cp neuron-encrypt-cli-macos.tar.gz "$CLI"
+    - sha256sum "$CLI" > SHA256SUMS-cli-macos.txt
+    - cat SHA256SUMS-cli-macos.txt
+    - |
+      BASE="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${VERSION}"
+      LATEST="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/latest"
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$CLI" "$BASE/$CLI"
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file SHA256SUMS-cli-macos.txt "$BASE/SHA256SUMS-cli-macos.txt" || true
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$CLI" "$LATEST/$CLI" || true
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file SHA256SUMS-cli-macos.txt "$LATEST/SHA256SUMS.txt" || true
+      echo "PRODUCT LINK (stable): $BASE/$CLI"
+  artifacts:
+    paths:
+      - neuron-encrypt-cli-*-macos-x86_64
+      - SHA256SUMS-cli-macos.txt
+    expire_in: "30 days"
