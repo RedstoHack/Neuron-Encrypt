@@ -127,16 +127,19 @@ appimage:
     - apt-get update -qq
     - apt-get install -y -qq --no-install-recommends
         curl desktop-file-utils file libfuse2
-    # appimagetool + the runtime. Fetched directly rather than via apt because
-    # Ubuntu 22.04 does not package it.
-    # curl -L rather than wget: the asset URL 302-redirects to
-    # release-assets.githubusercontent.com, and wget -q aborted on that chain
-    # (exit 5) even though the URL is valid.
-    - curl --fail --location --retry 3
-        "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
-        -o /usr/local/bin/appimagetool
+    # appimagetool + the runtime, fetched directly because Ubuntu 22.04 does
+    # not package it. curl -L (not wget -q) because the asset 302-redirects to
+    # release-assets.githubusercontent.com and wget aborted on that chain.
+    #
+    # The URL is held in a variable and the command kept short: a long wrapped
+    # curl with a trailing continuation is parsed by GitLab as a nested list
+    # and fails CI config validation outright.
+    - AI_TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+    - curl -fL --retry 3 "$AI_TOOL_URL" -o /usr/local/bin/appimagetool
     - chmod +x /usr/local/bin/appimagetool
-    - appimagetool --version || echo "note: appimagetool --version unsupported; continuing"
+    # The tool is itself an AppImage, so on a host without FUSE it must be told
+    # to unpack itself. APPIMAGE_EXTRACT_AND_RUN is set job-wide above.
+    - appimagetool --version || echo "appimagetool version probe failed, continuing"
   script:
     - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
     - APPDIR="/tmp/neuron-encrypt.AppDir"
