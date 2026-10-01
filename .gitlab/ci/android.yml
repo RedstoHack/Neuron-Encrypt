@@ -39,15 +39,22 @@ build-android-apk:
     - echo "Building Android JNI libs (4 ABIs)..."
     - chmod +x android/build-rust.sh
     - ./android/build-rust.sh
-    - echo "Assembling release APK (fdroid flavor — unsigned)..."
-    - cd android
     - export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
     - export PATH="$JAVA_HOME/bin:$PATH"
-    # fdroidRelease = minified + ProGuard, no signing config (F-Droid signs it themselves)
+    - cd android
+    # Two artifacts, two audiences:
+    #  - fdroidRelease: unsigned, for F-Droid (which signs with its own key).
+    #  - standardRelease: signed with the keystore in CI variables, for people
+    #    downloading from the release page. Without this the only APK published
+    #    was unsigned and could not be installed outside F-Droid.
+    - echo "Assembling release APK (fdroid flavor — unsigned)..."
     - ./gradlew :app:assembleFdroidRelease --no-daemon
+    - echo "Assembling release APK (standard flavor — signed)..."
+    - ./gradlew :app:assembleStandardRelease --no-daemon
   artifacts:
     paths:
       - android/app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
+      - android/app/build/outputs/apk/standard/release/app-standard-release.apk
     expire_in: "30 days"
 
 package-android:
@@ -59,14 +66,28 @@ package-android:
     # Read version from Cargo.toml (source of truth for all platforms)
     - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
     - APK_NAME="neuron-encrypt-${VERSION}-android.apk"
-    # Rename the Gradle output to a consistent versioned name
     - cp android/app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk "$APK_NAME"
     - sha256sum "$APK_NAME" > SHA256SUMS-android.txt
     - cat SHA256SUMS-android.txt
     # Upload to Package Registry (permanent, never expires)
     - bash .gitlab/ci/publish-android.sh "$APK_NAME" "$VERSION"
+    # The signed APK is the one people actually install, so it is published
+    # under its own package name to keep the two from colliding.
+    - |
+      if [ -f android/app/build/outputs/apk/standard/release/app-standard-release.apk ]; then
+        SIGNED="neuron-encrypt-${VERSION}-android-signed.apk"
+        cp android/app/build/outputs/apk/standard/release/app-standard-release.apk "$SIGNED"
+        sha256sum "$SIGNED" > SHA256SUMS-android-signed.txt
+        curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$SIGNED" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-android/${VERSION}/${SIGNED}"
+        curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file SHA256SUMS-android-signed.txt \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-android/${VERSION}/SHA256SUMS-android-signed.txt" || true
+        echo "SIGNED APK: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-android/${VERSION}/${SIGNED}"
+      else
+        echo "WARN: signed APK not produced (keystore variables missing?)"
+      fi
   artifacts:
     paths:
-      - neuron-encrypt-*-android.apk
-      - SHA256SUMS-android.txt
+      - neuron-encrypt-*-android*.apk
+      - SHA256SUMS-android*.txt
     expire_in: "30 days"

@@ -26,7 +26,7 @@
   <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" /></noscript>
   <link rel="stylesheet" href="style.css" />
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Neuron Encrypt","translate":"no","applicationCategory":"SecurityApplication","operatingSystem":"Windows, macOS, Linux, Android","softwareVersion":"2.2.0","license":"https://www.gnu.org/licenses/gpl-3.0.html","offers":{"@type":"Offer","price":"0"},"sameAs":["https://gitlab.com/theredhacker0345/neuron-encrypt"]}
+  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Neuron Encrypt","translate":"no","applicationCategory":"SecurityApplication","operatingSystem":"Windows, macOS, Linux, Android","softwareVersion":"2.3.0","license":"https://www.gnu.org/licenses/gpl-3.0.html","offers":{"@type":"Offer","price":"0"},"sameAs":["https://gitlab.com/theredhacker0345/neuron-encrypt"]}
   </script>
 </head>
 <body>
@@ -46,7 +46,7 @@
   </div>
 
   <div class="announce" id="announce" role="note">
-    <p><span class="announce-badge" translate="no">v2.2.0</span> Metadata scrubbing is here — 14 formats, zero pixels touched. <a href="#scrub">See what gets removed →</a></p>
+    <p><span class="announce-badge" translate="no">v2.3.0</span> Metadata scrubbing: 18 formats, plus three corrupt-file bugs fixed. <a href="#scrub">See what gets removed →</a></p>
     <button type="button" id="announce-close" aria-label="Dismiss announcement">✕</button>
   </div>
   <header class="site-header" id="top">
@@ -57,7 +57,7 @@
             <svg viewBox="0 0 24 24"><rect x="3" y="10.5" width="18" height="10" rx="2.5"></rect><path d="M7 10.5V7a5 5 0 0 1 10 0v3.5"></path><circle cx="12" cy="15.5" r="1.2"></circle></svg>
           </span>
           <span class="brand-name" translate="no">Neuron <b>Encrypt</b></span>
-          <span class="version-pill" translate="no">v2.2.0</span>
+          <span class="version-pill" translate="no">v2.3.0</span>
         </a>
         <div class="nav-right">
           <div class="nav-links" id="nav-links">
@@ -85,7 +85,7 @@
     <!-- ============ HERO ============ -->
     <section class="hero section-shell" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <div class="eyebrow reveal"><span class="status-dot" aria-hidden="true"></span><span translate="no">v2.2.0 · VAULTX04 · local by design</span></div>
+        <div class="eyebrow reveal"><span class="status-dot" aria-hidden="true"></span><span translate="no">v2.3.0 · VAULTX04 · local by design</span></div>
         <h1 id="hero-title" class="reveal">Your files.<br /><em>Your keys.</em><br /><span class="muted">Never the cloud.</span></h1>
         <p class="hero-lede reveal">Neuron Encrypt seals sensitive files into authenticated <code translate="no">.vx2</code> vaults — on your device, with memory-hard cryptography. No account. No server. Nothing to call home.</p>
         <div class="hero-actions reveal">
@@ -379,11 +379,11 @@
               <tbody>
                 <tr><td>Images</td><td translate="no">JPEG · PNG · WebP · GIF · TIFF · BMP</td><td>EXIF + GPS, XMP, IPTC, ICC, comments</td></tr>
                 <tr><td>Documents</td><td translate="no">PDF · docx · xlsx · pptx</td><td>Author, dates, XMP streams, thumbnails</td></tr>
-                <tr><td>Audio</td><td translate="no">MP3 · FLAC · OGG · WAV</td><td>ID3v1/v2, APE, Vorbis comments, RIFF INFO</td></tr>
-                <tr><td>Video</td><td translate="no">MP4 · MOV</td><td>iTunes / ilst atoms</td></tr>
+                <tr><td>Audio</td><td translate="no">MP3 · AAC · M4A · FLAC · OGG · Opus · WAV · AIFF</td><td>ID3v1/v2, APE, iTunes/ilst, Vorbis comments, RIFF INFO, IFF text chunks</td></tr>
+                <tr><td>Video</td><td translate="no">MP4 · MOV · 3GP · 3G2</td><td>iTunes / ilst atoms, GPS, device and encoder tags</td></tr>
               </tbody>
             </table>
-            <p class="table-note">Fail-closed: unrecognized formats, plain zips, and HEIC abort with an explicit error — never a silent copy.</p>
+            <p class="table-note">Fail-closed: unrecognized formats, plain zips, camera RAW, archives, and HEIC/HEIF abort with an explicit error — never a silent copy. New in 2.3.0: AAC, M4A, Opus, AIFF and 3GP/3G2.</p>
           </div>
         </div>
       </div>
@@ -455,19 +455,19 @@
         <div class="download-grid">
           <a class="platform-card magnetic reveal" data-os="windows" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
             <span class="platform-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1"></rect><rect x="13" y="4" width="8" height="7" rx="1"></rect><rect x="3" y="13" width="8" height="7" rx="1"></rect><rect x="13" y="13" width="8" height="7" rx="1"></rect></svg></span>
-            <span class="platform-name">Windows</span><span class="platform-desc" translate="no">x64 GUI + CLI · installer + zip</span><span class="platform-badge" translate="no">v2.2.0</span><span class="platform-arrow" aria-hidden="true">↗</span>
+            <span class="platform-name">Windows</span><span class="platform-desc" translate="no">x64 GUI + CLI · installer + zip</span><span class="platform-badge" translate="no">v2.3.0</span><span class="platform-arrow" aria-hidden="true">↗</span>
           </a>
           <a class="platform-card magnetic reveal" data-os="macos" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
             <span class="platform-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 13.5c0-2.2 1.8-3.2 1.9-3.3a3.7 3.7 0 0 0-2.9-1.6c-1.2-.1-2.4.7-3 .7-.6 0-1.5-.7-2.5-.7a3.8 3.8 0 0 0-3.2 2c-1.4 2.4-.4 6 1 8 .7 1 1.4 2.1 2.4 2 1 0 1.3-.6 2.5-.6s1.5.6 2.5.6c1 0 1.7-1 2.4-2 .8-1.2 1.1-2.3 1.1-2.4-.1 0-2.2-.8-2.2-3.7Z"></path><path d="M14.5 6.2c.5-.6.8-1.4.7-2.2-.7 0-1.5.5-2 1.1-.4.5-.8 1.3-.7 2.1.8.1 1.6-.4 2-1Z"></path></svg></span>
-            <span class="platform-name">macOS</span><span class="platform-desc" translate="no">Intel archive · Apple Silicon best-effort</span><span class="platform-badge" translate="no">v2.2.0</span><span class="platform-arrow" aria-hidden="true">↗</span>
+            <span class="platform-name">macOS</span><span class="platform-desc" translate="no">Intel archive · Apple Silicon best-effort</span><span class="platform-badge" translate="no">v2.3.0</span><span class="platform-arrow" aria-hidden="true">↗</span>
           </a>
           <a class="platform-card magnetic reveal" data-os="linux" href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">
             <span class="platform-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.4 3.1 7.6 8 9 4.9-1.4 8-4.6 8-9V7l-8-4Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg></span>
-            <span class="platform-name">Linux</span><span class="platform-desc" translate="no">x64 GUI + CLI archive</span><span class="platform-badge" translate="no">v2.2.0</span><span class="platform-arrow" aria-hidden="true">↗</span>
+            <span class="platform-name">Linux</span><span class="platform-desc" translate="no">x64 GUI + CLI · AppImage or tar.gz</span><span class="platform-badge" translate="no">v2.3.0</span><span class="platform-arrow" aria-hidden="true">↗</span>
           </a>
           <a class="platform-card magnetic reveal" data-os="android" href="https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest" target="_blank" rel="noopener">
             <span class="platform-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"></rect><path d="M8 5h8"></path><path d="M10 19h4"></path></svg></span>
-            <span class="platform-name">Android</span><span class="platform-desc" translate="no">APK · Android 7.0+ · F-Droid available</span><span class="platform-badge" translate="no">v2.2.0 · v6</span><span class="platform-arrow" aria-hidden="true">↗</span>
+            <span class="platform-name">Android</span><span class="platform-desc" translate="no">APK · Android 7.0+ · F-Droid available</span><span class="platform-badge" translate="no">v2.3.0 · v7</span><span class="platform-arrow" aria-hidden="true">↗</span>
           </a>
         </div>
 
@@ -500,8 +500,8 @@
             <button class="tab" role="tab" aria-selected="false" aria-controls="inst-macos" id="instab-macos" type="button" tabindex="-1">macOS</button>
           </div>
           <div class="cli-panel tab-panel active" id="inst-linux" role="tabpanel" aria-labelledby="instab-linux" tabindex="0">
-            <div class="cli-head"><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="cli-title">Install the Linux CLI — verify, then run</span><button class="copy-button" type="button" data-copy="VERSION=2.2.0&#10;CLI_FILE=&quot;neuron-encrypt-cli-${VERSION}-linux-x86_64&quot;&#10;curl -fL &quot;https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_FILE}&quot; -o &quot;$CLI_FILE&quot;&#10;curl -fL &quot;https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-linux.txt&quot; -o SHA256SUMS-cli-linux.txt&#10;sha256sum --check SHA256SUMS-cli-linux.txt&#10;chmod +x &quot;$CLI_FILE&quot;&#10;install -Dm755 &quot;$CLI_FILE&quot; &quot;$HOME/.local/bin/neuron-encrypt-cli&quot;&#10;neuron-encrypt-cli --help">Copy</button></div>
-<pre><code>VERSION=2.2.0
+            <div class="cli-head"><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="cli-title">Install the Linux CLI — verify, then run</span><button class="copy-button" type="button" data-copy="VERSION=2.3.0&#10;CLI_FILE=&quot;neuron-encrypt-cli-${VERSION}-linux-x86_64&quot;&#10;curl -fL &quot;https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_FILE}&quot; -o &quot;$CLI_FILE&quot;&#10;curl -fL &quot;https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-linux.txt&quot; -o SHA256SUMS-cli-linux.txt&#10;sha256sum --check SHA256SUMS-cli-linux.txt&#10;chmod +x &quot;$CLI_FILE&quot;&#10;install -Dm755 &quot;$CLI_FILE&quot; &quot;$HOME/.local/bin/neuron-encrypt-cli&quot;&#10;neuron-encrypt-cli --help">Copy</button></div>
+<pre><code>VERSION=2.3.0
 CLI_FILE="neuron-encrypt-cli-${VERSION}-linux-x86_64"
 curl -fL "https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_FILE}" -o "$CLI_FILE"
 curl -fL "https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-linux.txt" -o SHA256SUMS-cli-linux.txt
@@ -511,16 +511,16 @@ install -Dm755 "$CLI_FILE" "$HOME/.local/bin/neuron-encrypt-cli"
 neuron-encrypt-cli --help</code></pre>
           </div>
           <div class="cli-panel tab-panel" id="inst-windows" role="tabpanel" aria-labelledby="instab-windows" tabindex="0" hidden>
-            <div class="cli-head"><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="cli-title">Windows — download, verify, run</span><button class="copy-button" type="button" data-copy="neuron-encrypt-cli-2.2.0-windows-x86_64.exe --help">Copy</button></div>
+            <div class="cli-head"><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="cli-title">Windows — download, verify, run</span><button class="copy-button" type="button" data-copy="neuron-encrypt-cli-2.3.0-windows-x86_64.exe --help">Copy</button></div>
 <pre><code># 1. Download the .exe from Packages (link above)
 # 2. Verify against SHA256SUMS-cli-windows.txt, then:
-neuron-encrypt-cli-2.2.0-windows-x86_64.exe --help
+neuron-encrypt-cli-2.3.0-windows-x86_64.exe --help
 # SmartScreen warns on first run (unsigned) — click “Run anyway”.</code></pre>
           </div>
           <div class="cli-panel tab-panel" id="inst-macos" role="tabpanel" aria-labelledby="instab-macos" tabindex="0" hidden>
-            <div class="cli-head"><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="cli-title">macOS Intel — verify, then run</span><button class="copy-button" type="button" data-copy="chmod +x neuron-encrypt-cli-2.2.0-macos-x86_64&#10;./neuron-encrypt-cli-2.2.0-macos-x86_64 --help">Copy</button></div>
-<pre><code>chmod +x neuron-encrypt-cli-2.2.0-macos-x86_64
-./neuron-encrypt-cli-2.2.0-macos-x86_64 --help
+            <div class="cli-head"><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="terminal-dot" aria-hidden="true"></span><span class="cli-title">macOS Intel — verify, then run</span><button class="copy-button" type="button" data-copy="chmod +x neuron-encrypt-cli-2.3.0-macos-x86_64&#10;./neuron-encrypt-cli-2.3.0-macos-x86_64 --help">Copy</button></div>
+<pre><code>chmod +x neuron-encrypt-cli-2.3.0-macos-x86_64
+./neuron-encrypt-cli-2.3.0-macos-x86_64 --help
 # Apple Silicon: use the macOS archive until a universal CLI ships.</code></pre>
           </div>
         </div>
@@ -535,6 +535,7 @@ neuron-encrypt-cli-2.2.0-windows-x86_64.exe --help
         <h2 id="changelog-title" class="reveal">Shipped, <em>tested,</em> documented.</h2>
       </div>
       <ol class="timeline">
+        <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.3.0</span><div><strong>Four more formats, three corruption fixes</strong><p>Scrubbing added for AAC, M4A, Opus, AIFF and 3GP/3G2 — 18 formats total. A truncated PNG, WebP or GIF was being reported as successfully scrubbed and could replace the original with a corrupt stub; all three now fail closed. Fixed the Android notification that could not be dismissed until the app was force-stopped. 86/86 tests.</p><span class="timeline-date">2026-10-01</span></div></li>
         <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.2.0</span><div><strong>Metadata scrubbing everywhere</strong><p>One Rust engine for GUI, CLI, and Android. 63/63 tests green, clippy &amp; fmt clean. Fixed an Android mid-chunk cancel spin and an fd-leak edge.</p><span class="timeline-date">2026-08-23</span></div></li>
         <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.1.2</span><div><strong>Drive files arrive intact</strong><p>JNI no longer detaches the fd early — remote providers stop producing 0-byte outputs. Predictive-back warning removed.</p><span class="timeline-date">2026-08-10</span></div></li>
         <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.1.1</span><div><strong>No more ANRs on older phones</strong><p>Crypto moved off the UI thread, fsync before 100%, batch under a foreground service, neutral cancel state.</p><span class="timeline-date">2026-08-03</span></div></li>
@@ -593,7 +594,7 @@ neuron-encrypt-cli-2.2.0-windows-x86_64.exe --help
           <a class="button button-primary button-large magnetic" href="#download">Download now <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></a>
           <a class="button button-secondary button-large magnetic" href="https://gitlab.com/theredhacker0345/neuron-encrypt" target="_blank" rel="noopener">Star on GitLab</a>
         </div>
-        <p class="cta-meta reveal" translate="no">GPLv3 · v2.2.0 · SHA-256 verified · 63/63 tests</p>
+        <p class="cta-meta reveal" translate="no">GPLv3 · v2.3.0 · SHA-256 verified · 86/86 tests</p>
       </div>
     </section>
   </main>

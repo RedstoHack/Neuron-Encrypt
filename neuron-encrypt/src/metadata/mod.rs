@@ -15,6 +15,8 @@
 //! metadata without corrupting the payload. Unknown formats are rejected
 //! loudly instead of being copied silently.
 
+#[cfg(test)]
+pub(crate) mod brutal;
 pub mod documents;
 pub mod images;
 pub mod media;
@@ -43,10 +45,14 @@ pub enum MediaFormat {
     Pdf,
     Ooxml,
     Mp3,
+    Aac,
     Flac,
     Ogg,
+    Opus,
     Wav,
+    Aiff,
     Mp4,
+    MobileMp4,
 }
 
 impl MediaFormat {
@@ -62,10 +68,14 @@ impl MediaFormat {
             MediaFormat::Pdf => "PDF",
             MediaFormat::Ooxml => "Office document",
             MediaFormat::Mp3 => "MP3",
+            MediaFormat::Aac => "AAC",
             MediaFormat::Flac => "FLAC",
             MediaFormat::Ogg => "OGG",
+            MediaFormat::Opus => "Opus",
             MediaFormat::Wav => "WAV",
+            MediaFormat::Aiff => "AIFF",
             MediaFormat::Mp4 => "MP4/MOV",
+            MediaFormat::MobileMp4 => "3GP/3G2",
         }
     }
 
@@ -83,10 +93,14 @@ impl MediaFormat {
             // not distinguish docx/xlsx/pptx and must not guess one.
             MediaFormat::Ooxml => "",
             MediaFormat::Mp3 => "mp3",
+            MediaFormat::Aac => "aac",
             MediaFormat::Flac => "flac",
             MediaFormat::Ogg => "ogg",
+            MediaFormat::Opus => "opus",
             MediaFormat::Wav => "wav",
+            MediaFormat::Aiff => "aiff",
             MediaFormat::Mp4 => "mp4",
+            MediaFormat::MobileMp4 => "3gp",
         }
     }
 }
@@ -167,7 +181,22 @@ pub fn detect_media_format(header: &[u8]) -> Option<MediaFormat> {
         return Some(MediaFormat::Flac);
     }
     if header.starts_with(b"OggS") {
+        // Opus and Vorbis share the Ogg container and are told apart by the
+        // first packet's codec id, which appears in the bytes right after the
+        // page header. Both are scrubbed by the same lofty path, but the
+        // reported format (and default output extension) must match the file.
+        if find_subslice(header, b"OpusHead").is_some() {
+            return Some(MediaFormat::Opus);
+        }
         return Some(MediaFormat::Ogg);
+    }
+    // AIFF/AIFC: "FORM" <be32 size> "AIFF" | "AIFC". Big-endian chunked
+    // container handled by lofty's IFF reader.
+    if header.starts_with(b"FORM")
+        && header.len() >= 12
+        && (&header[8..12] == b"AIFF" || &header[8..12] == b"AIFC")
+    {
+        return Some(MediaFormat::Aiff);
     }
     if header.starts_with(b"%PDF-") {
         return Some(MediaFormat::Pdf);
@@ -180,8 +209,22 @@ pub fn detect_media_format(header: &[u8]) -> Option<MediaFormat> {
         }
         return None;
     }
-    if header.starts_with(b"ID3") || header[0] == 0xFF && (header[1] & 0xE0) == 0xE0 {
+    if header.starts_with(b"ID3") {
         return Some(MediaFormat::Mp3);
+    }
+    // MPEG audio (MP1/2/3) and raw AAC share the 11-bit frame sync. They are
+    // told apart by the layer bits: MPEG reserves 00 (reserved), so a real
+    // MPEG frame always carries a non-zero layer, while ADTS AAC uses 00.
+    if header[0] == 0xFF && (header[1] & 0xE0) == 0xE0 {
+        let layer = (header[1] >> 1) & 0x03;
+        if layer == 0x00 {
+            return Some(MediaFormat::Aac);
+        }
+        return Some(MediaFormat::Mp3);
+    }
+    // ADIF is the other raw AAC variant lofty reads.
+    if header.starts_with(b"ADIF") {
+        return Some(MediaFormat::Aac);
     }
     // ISO-BMFF family: box size at 0..4, "ftyp" at 4..8, brand at 8..12.
     if &header[4..8] == b"ftyp" {
@@ -190,18 +233,24 @@ pub fn detect_media_format(header: &[u8]) -> Option<MediaFormat> {
         // lofty-based media scrubber. HEIF/HEIC brands are matched separately
         // below and rejected (no structural scrubber yet), so they must stay
         // out of this list.
-        const MP4_BRANDS: [&[u8; 4]; 28] = [
+        const MP4_BRANDS: [&[u8; 4]; 17] = [
             b"isom", b"iso2", b"mp41", b"mp42", b"avc1", b"M4A ", b"M4V ", b"qt  ", b"dash",
             b"MSNV",
             // Newer ISO base-media file format versions (modern phone cameras).
             b"iso5", b"iso6", b"iso7", b"iso8", b"iso9", b"isoa", b"isob",
-            // 3GPP / 3GPP2 mobile video (the default on many Android phones).
-            b"3gp4", b"3gp5", b"3gp6", b"3gp7", b"3gp8", b"3ge6", b"3gg6", b"3g2a",
-            // Apple audio/video books and Sony MV.
-            b"M4B ", b"M4P ", b"mqv ",
         ];
         if MP4_BRANDS.iter().any(|b| *b == brand) {
             return Some(MediaFormat::Mp4);
+        }
+        // 3GPP / 3GPP2 mobile video (the default on many Android phones) and
+        // the Apple book/podcast variants. Scrubbed by the same lofty path as
+        // MP4; reported separately so the output keeps the right extension.
+        const MOBILE_MP4_BRANDS: [&[u8; 4]; 12] = [
+            b"3gp4", b"3gp5", b"3gp6", b"3gp7", b"3gp8", b"3ge6", b"3gg6", b"3g2a", b"M4B ",
+            b"M4P ", b"mqv ", b"3g2b",
+        ];
+        if MOBILE_MP4_BRANDS.iter().any(|b| *b == brand) {
+            return Some(MediaFormat::MobileMp4);
         }
         const HEIF_BRANDS: [&[u8; 4]; 6] = [b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1"];
         if HEIF_BRANDS.iter().any(|b| *b == brand) {
@@ -448,10 +497,14 @@ pub fn scrub_file(
                 removed
             }
             MediaFormat::Mp3
+            | MediaFormat::Aac
             | MediaFormat::Flac
             | MediaFormat::Ogg
+            | MediaFormat::Opus
             | MediaFormat::Wav
-            | MediaFormat::Mp4 => {
+            | MediaFormat::Aiff
+            | MediaFormat::Mp4
+            | MediaFormat::MobileMp4 => {
                 drop(out);
                 let removed = media::scrub_media_file(src, &tmp)?;
                 if let Ok(f) = fs::File::open(&tmp) {

@@ -29,6 +29,7 @@ import com.neuronencrypt.app.ui.theme.*
 fun HomeScreen(
     onEncryptDecrypt: () -> Unit,
     onBatch: () -> Unit,
+    onFormats: () -> Unit,
     onAbout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -207,6 +208,30 @@ fun HomeScreen(
         ) {
             Text(
                 text = "Batch upload",
+                style = MaterialTheme.typography.labelLarge,
+                color = TextMed
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Lets the user check whether their file type is scrubbable *before*
+        // picking it, instead of discovering it only from an error.
+        OutlinedButton(
+            onClick = onFormats,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = TextHi
+            ),
+            border = ButtonDefaults.outlinedButtonBorder.copy(
+                brush = androidx.compose.ui.graphics.SolidColor(Border)
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(
+                text = "Supported formats",
                 style = MaterialTheme.typography.labelLarge,
                 color = TextMed
             )

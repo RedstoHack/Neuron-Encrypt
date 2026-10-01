@@ -54,8 +54,13 @@ class MainActivity : ComponentActivity() {
                         HomeScreen(
                             onEncryptDecrypt = { navController.navigate("single") },
                             onBatch = { navController.navigate("batch") },
+                            onFormats = { navController.navigate("formats") },
                             onAbout = {}
                         )
+                    }
+
+                    composable("formats") {
+                        FormatsScreen(onBack = { navController.popBackStack() })
                     }
 
                     composable(

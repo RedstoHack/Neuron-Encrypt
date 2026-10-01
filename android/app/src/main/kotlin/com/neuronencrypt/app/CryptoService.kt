@@ -55,6 +55,11 @@ class CryptoService : Service() {
          * swiping the app out of Recents cannot tear down a running operation
          * (which would drop the foreground protection it depends on) while still
          * clearing the notification of an idle service.
+         *
+         * It also gates [updateProgress]. Progress ticks are posted through
+         * [NotificationManagerCompat] rather than via the service, so a tick
+         * delivered after the operation ended would otherwise re-create an
+         * ongoing notification that no service owns and nothing can dismiss.
          */
         private val operationInFlight = AtomicBoolean(false)
 
@@ -62,8 +67,18 @@ class CryptoService : Service() {
             operationInFlight.set(inFlight)
         }
 
-        /** Starts the foreground service for a new operation. */
+        /**
+         * Starts the foreground service for a new operation.
+         *
+         * Cancels any leftover notification first. A previous run that was
+         * killed (process death, task swiped away, `stopService` racing a final
+         * progress tick) can leave an ongoing entry behind that would otherwise
+         * still be showing when the next operation begins.
+         */
         fun start(context: Context, action: String, filename: String) {
+            NotificationManagerCompat.from(context).apply {
+                if (areNotificationsEnabled()) cancel(NOTIFICATION_ID)
+            }
             val intent = Intent(context, CryptoService::class.java).apply {
                 setAction(ACTION_START)
                 putExtra(EXTRA_ACTION, action)
@@ -77,15 +92,39 @@ class CryptoService : Service() {
          * enough for throttled progress ticks, safe from any thread, and it can
          * never resurrect a stopped service (which is what made the previous
          * `startForegroundService()`-per-tick approach crash-prone).
+         *
+         * Dropped once the operation is no longer in flight: the native call
+         * keeps reporting while it unwinds, and a late `notify()` would put an
+         * ongoing notification back into the shade *after* teardown, which the
+         * user cannot swipe away — it survives until the app is force-stopped.
          */
         fun updateProgress(context: Context, action: String, filename: String, progress: Int) {
+            if (!operationInFlight.get()) return
             val manager = NotificationManagerCompat.from(context)
             if (!manager.areNotificationsEnabled()) return
             manager.notify(NOTIFICATION_ID, buildNotification(context, action, filename, progress))
         }
 
-        /** Removes the ongoing notification and stops the service. */
+        /**
+         * Removes the ongoing notification and stops the service.
+         *
+         * The notification is cancelled explicitly rather than relying on
+         * `stopForeground()` in [onDestroy]. `stopForeground(REMOVE)` only
+         * detaches the notification the *service* posted through
+         * `startForeground()`; because progress updates are posted directly
+         * through [NotificationManagerCompat] under the same id, that call is
+         * not sufficient and the shade entry could survive. Cancelling by id
+         * removes whichever posted it.
+         *
+         * The completion notice ([NOTIFICATION_ID_COMPLETED]) is deliberately
+         * left alone: callers post it before reaching this method, and it is
+         * dismissible, which is the whole point of telling a backgrounded user
+         * the operation finished.
+         */
         fun stop(context: Context) {
+            NotificationManagerCompat.from(context).apply {
+                if (areNotificationsEnabled()) cancel(NOTIFICATION_ID)
+            }
             context.stopService(Intent(context, CryptoService::class.java))
         }
 
@@ -173,7 +212,7 @@ class CryptoService : Service() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (!operationInFlight.get()) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            dismissNotification()
             stopSelf()
         }
         super.onTaskRemoved(rootIntent)
@@ -182,8 +221,26 @@ class CryptoService : Service() {
     override fun onDestroy() {
         // Covers the stopService() path: ACTION_STOP is never delivered because
         // stopService() does not deliver intents.
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        //
+        // Cancel by id as well as via stopForeground(): the ongoing notification
+        // is also posted directly by updateProgress(), and stopForeground()
+        // alone does not remove an entry that was never attached to this
+        // service — which is what left an undismissable notification behind
+        // until the user force-stopped the app.
+        dismissNotification()
         super.onDestroy()
+    }
+
+    /**
+     * Removes the ongoing progress notification. The dismissible completion
+     * notice is intentionally kept so a backgrounded user still learns the
+     * operation finished.
+     */
+    private fun dismissNotification() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        NotificationManagerCompat.from(this).apply {
+            if (areNotificationsEnabled()) cancel(NOTIFICATION_ID)
+        }
     }
 
     private fun createNotificationChannel() {

@@ -95,3 +95,109 @@ package-linux:
       - neuron-encrypt-*-linux-x86_64.tar.gz
       - SHA256SUMS-linux.txt
     expire_in: "30 days"
+
+# -----------------------------------------------------------------------------
+# AppImage
+# -----------------------------------------------------------------------------
+#
+# A single self-contained file that runs on any x86_64 Linux without a package
+# manager — the format most people expect for a Linux desktop app.
+#
+# Notes:
+# - The AppImage runtime needs FUSE to self-mount, which is unavailable inside
+#   most CI containers. APPIMAGE_EXTRACT_AND_RUN=1 sidesteps that by unpacking to
+#   a temp dir; the produced file is identical and still runs normally on a
+#   user's machine where FUSE works.
+# - Built on Ubuntu 22.04 (glibc 2.35) so the result also runs on older
+#   distros. Building on the Debian-based rust:1.88-slim image would raise the
+#   glibc floor and exclude them.
+# - eframe/egui needs the GL and XCB runtime libraries bundled in, or the app
+#   exits immediately on a machine that lacks them.
+# - AppImage is x86_64 or aarch64 and is not cross-buildable; this job covers
+#   x86_64, which is what the tar.gz job builds too.
+
+appimage:
+  stage: package
+  needs: [build-linux]
+  image: ubuntu:22.04
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
+    APPIMAGE_EXTRACT_AND_RUN: "1"
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends
+        wget desktop-file-utils file libfuse2
+    # appimagetool + the runtime. Fetched directly rather than via apt because
+    # Ubuntu 22.04 does not package it.
+    - wget -q
+        "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+        -O /usr/local/bin/appimagetool
+    - chmod +x /usr/local/bin/appimagetool
+  script:
+    - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
+    - APPDIR="/tmp/neuron-encrypt.AppDir"
+    - mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+
+    - cp neuron-encrypt/target/release/neuron-encrypt "$APPDIR/usr/bin/"
+    - cp neuron-encrypt/target/release/neuron-encrypt-cli "$APPDIR/usr/bin/"
+
+    # Desktop entry. No categories that would pull in a menu editor; Terminal
+    # is false because this is a GUI app (the CLI binary is also bundled for
+    # anyone who wants it from a terminal).
+    - |
+      cat > "$APPDIR/neuron-encrypt.desktop" <<EOF
+      [Desktop Entry]
+      Type=Application
+      Name=Neuron Encrypt
+      Comment=Local file encryption and metadata scrubbing
+      Exec=neuron-encrypt
+      Icon=neuron-encrypt
+      Terminal=false
+      Categories=Utility;Security;
+      EOF
+    - cp "$APPDIR/neuron-encrypt.desktop" "$APPDIR/usr/share/applications/"
+
+    # Icon. Falls back to a generated placeholder so the build never fails on a
+    # missing asset; replace with the real branded icon when available.
+    - |
+      ICON="$APPDIR/usr/share/icons/hicolor/256x256/apps/neuron-encrypt.png"
+      mkdir -p "$(dirname "$ICON")"
+      if [ -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png ]; then
+        cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png "$ICON"
+      else
+        echo "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAO0lEQVR42u3OMQEAAAgDoC251a3gLwSgcrfTBgQCgUAgEAgEAoFAIBAIBAKBQCAQCAQCgUAgEAgEAoFAIBAIBAKBQCAQCAQCgUAgEAgEAoFA8G0Kc3AAAAAElFTkSuQmCC" \
+          | base64 -d > "$ICON"
+      fi
+      ls -l "$ICON"
+
+    - |
+      # The eframe/egui runtime libraries. Without these the app starts and
+      # immediately dies on a clean system.
+      mkdir -p "$APPDIR/usr/lib"
+      for lib in libGL.so.1 libEGL.so.1 libxkbcommon.so.0 libxcb.so.1 libxcb-cursor.so.0; do
+        path=$(ldconfig -p | awk -v l="$lib" '$1==l {print $NF; exit}')
+        [ -n "$path" ] && cp -L "$path" "$APPDIR/usr/lib/" || echo "WARN: $lib not found on this image"
+      done
+
+    - |
+      # desktop-file-validate needs the entry at the AppDir root and the icon
+      # resolvable; both are satisfied above.
+      appimagetool --no-appstream "$APPDIR" "neuron-encrypt-${VERSION}-linux-x86_64.AppImage"
+
+    - sha256sum "neuron-encrypt-${VERSION}-linux-x86_64.AppImage" > SHA256SUMS-appimage.txt
+    - cat SHA256SUMS-appimage.txt
+    - file "neuron-encrypt-${VERSION}-linux-x86_64.AppImage"
+    - |
+      AI="neuron-encrypt-${VERSION}-linux-x86_64.AppImage"
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$AI" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${AI}" \
+      && echo "APPIMAGE LINK (stable): ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/${AI}" \
+      || echo "WARN: AppImage upload failed"
+      curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file SHA256SUMS-appimage.txt \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${VERSION}/SHA256SUMS-appimage.txt" \
+      || true
+  artifacts:
+    paths:
+      - neuron-encrypt-*.AppImage
+      - SHA256SUMS-appimage.txt
+    expire_in: "30 days"

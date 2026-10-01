@@ -161,6 +161,7 @@ fn scrub_png(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
 
     let mut removed = Vec::new();
     let mut pos = 8usize;
+    let mut saw_iend = false;
 
     while pos + 12 <= data.len() {
         let len =
@@ -185,8 +186,21 @@ fn scrub_png(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         pos = end;
 
         if &kind == b"IEND" {
+            saw_iend = true;
             break;
         }
+    }
+
+    // A well-formed PNG always ends with IEND. Without this check a file
+    // truncated on a chunk boundary (e.g. signature + IHDR + tEXt and nothing
+    // else) fell out of the loop above with `pos == data.len()`, passed the
+    // trailing-bytes test, and was reported as successfully scrubbed — even
+    // though it has no image data at all. In --in-place mode that would
+    // replace a user's file with a stub.
+    if !saw_iend {
+        return Err(CryptoError::MalformedFile(
+            "PNG is truncated (no IEND chunk)".to_string(),
+        ));
     }
 
     if pos != data.len() {
@@ -212,6 +226,7 @@ fn scrub_webp(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     let mut body = Vec::with_capacity(data.len());
     let mut removed = Vec::new();
     let mut pos = 12usize;
+    let mut saw_image_data = false;
 
     while pos + 8 <= data.len() {
         let kind = &data[pos..pos + 4];
@@ -222,6 +237,12 @@ fn scrub_webp(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             return Err(CryptoError::MalformedFile(
                 "WebP chunk overruns file".to_string(),
             ));
+        }
+
+        // VP8 / VP8L / VP8X are the bitstream and container chunks that carry
+        // the image. A file without one of them holds no picture at all.
+        if matches!(kind, b"VP8 " | b"VP8L" | b"VP8X") {
+            saw_image_data = true;
         }
 
         if kind == b"EXIF" || kind == b"XMP " {
@@ -238,6 +259,15 @@ fn scrub_webp(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             }
         }
         pos = end + (len % 2);
+    }
+
+    // As with PNG, running out of data mid-file is not a valid stopping point:
+    // without this a file truncated right after a metadata chunk would be
+    // reported as scrubbed even though it contains no image.
+    if !saw_image_data {
+        return Err(CryptoError::MalformedFile(
+            "WebP has no image chunk (VP8/VP8L/VP8X)".to_string(),
+        ));
     }
 
     if pos != data.len() {
@@ -300,13 +330,15 @@ fn scrub_gif(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
 
     let mut out = Vec::with_capacity(data.len());
     let mut removed = Vec::new();
+    let mut saw_image = false;
+    let mut saw_trailer = false;
     out.extend_from_slice(&data[..pos]);
 
     while pos < data.len() {
         match data[pos] {
             GIF_TRAILER => {
                 out.push(GIF_TRAILER);
-                pos += 1;
+                saw_trailer = true;
                 break;
             }
             GIF_EXTENSION => {
@@ -337,6 +369,7 @@ fn scrub_gif(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
                 gif_skip_sub_blocks(data, &mut block_end)?;
                 out.extend_from_slice(&data[pos..block_end]);
                 pos = block_end;
+                saw_image = true;
             }
             other => {
                 return Err(CryptoError::MalformedFile(format!(
@@ -346,10 +379,19 @@ fn scrub_gif(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         }
     }
 
-    if data.last() == Some(&GIF_TRAILER) && pos == data.len() {
-        // Trailer consumed exactly once.
-    } else if pos == data.len() - 1 && data[data.len() - 1] == GIF_TRAILER {
-        out.push(GIF_TRAILER);
+    // A GIF is only valid once it has both an image and the 0x3B trailer.
+    // Without this, a file truncated straight after a comment extension exits
+    // the loop above with pos == data.len() and was reported as successfully
+    // scrubbed while containing no image data at all.
+    if !saw_image {
+        return Err(CryptoError::MalformedFile(
+            "GIF contains no image data".to_string(),
+        ));
+    }
+    if !saw_trailer {
+        return Err(CryptoError::MalformedFile(
+            "GIF is truncated (no trailer)".to_string(),
+        ));
     }
 
     Ok((out, dedup(removed)))

@@ -6,7 +6,7 @@
 
 AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
-[![Version](https://img.shields.io/badge/version-2.2.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
+[![Version](https://img.shields.io/badge/version-2.3.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![crates.io](https://img.shields.io/crates/v/neuron-encrypt?style=flat-square&logo=rust&label=crates.io)](https://crates.io/crates/neuron-encrypt)
@@ -43,7 +43,24 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 - **🌍 4 platforms** — Windows, macOS, Linux, Android 7.0+ (all from one Rust codebase)
 - **🔇 Offline-first** — Zero network permissions on Android, zero telemetry, zero tracking
 - **📦 Atomic writes** — Output goes to `.tmp` first, then renames. No partial files on crash
-- **🧽 Metadata scrubbing** — Remove EXIF/GPS, XMP, IPTC, ID3 and document properties from JPEG, PNG, WebP, GIF, TIFF, BMP, PDF, Office, MP3, FLAC, OGG, WAV and MP4 files
+- **🧽 Metadata scrubbing** — Remove EXIF/GPS, XMP, IPTC, ID3 and document properties from JPEG, PNG, WebP, GIF, TIFF, BMP, PDF, Office, MP3, AAC, M4A, FLAC, OGG, Opus, WAV, AIFF, MP4/MOV and 3GP/3G2 files
+
+---
+
+## What's new in 2.3.0
+
+- **Four more scrub formats — 18 in total.** Metadata removal now works on **AAC, M4A, Opus, AIFF and 3GP/3G2**, joining JPEG, PNG, WebP, GIF, TIFF, BMP, PDF, Office, MP3, FLAC, OGG, WAV, MP4 and MOV. All four are handled by the tag writer that was already a dependency, so there is no new runtime cost. Raw AAC used to be misdetected as MP3 and could not be scrubbed at all; 3GP was detected but written out with a `.mp4` extension.
+- **HEIC/HEIF stays rejected on purpose.** These carry GPS and device data in ISO-BMFF item boxes whose offsets point into the media payload. The available Rust crates either cannot write the container back or say so explicitly, and a bad rewrite would silently corrupt your photo — so HEIC fails closed with a clear message instead.
+- **Fixed: a truncated image could be replaced by a corrupt stub.** A PNG cut off at a chunk boundary was reported as *successfully scrubbed*, and `scrub --in-place` would replace the original with a header-only file containing no image data. WebP and GIF had the same flaw. All three now fail closed and leave the source untouched.
+- **Fixed: the Android notification that would not go away.** After a finished operation an ongoing notification sometimes stayed in the shade and could not be swiped away — it survived until the app was force-stopped from Settings. Progress updates bypassed the service, so `stopForeground()` could not remove them; they are now cancelled by id on every teardown path, and a late progress tick can no longer resurrect one.
+- **Android: batch runs report completion.** A multi-file batch finished silently for a backgrounded user; it now posts a counted summary.
+- **An in-app list of supported formats** so you can check before picking a file, and see exactly what is removed.
+- **A CI quality gate** runs `fmt`, `clippy -D warnings` and the full test suite on every push and merge request — previously nothing ran until a release tag.
+- **One release pipeline.** Pushing a `vX.Y.Z` tag builds Linux, Windows and Android in parallel and attaches the APK, the Windows EXE, the archives and all checksums to a single GitLab release. The macOS job is removed: it needed a self-hosted runner that does not exist, so it only ever sat pending.
+- **An AppImage for Linux**, alongside the tar.gz.
+- **F-Droid metadata corrected** — builds for version codes 4–7 added and `CurrentVersion` fixed from the long-stale 2.1.0/3.
+
+Tests: **86/86 pass** (63 at 2.2.0), with 14 new adversarial tests covering zero-byte, truncated, garbage and lookalike inputs, a byte-by-byte truncation sweep of every supported container, symlinks, cancellation and concurrent scrubs.
 
 ---
 
@@ -82,11 +99,31 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 | 🐧 Linux | x86_64 GUI + CLI archive | [Download from GitLab Package Registry ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages) |
 | 🤖 Android | APK (Android 7.0+) | [Latest release ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
 | 🖥️ Desktop GUI | Built alongside the CLI on Linux, Windows, and macOS | Use the platform archive above |
-| ⌨️ Linux CLI | Standalone x86_64 binary | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/neuron-encrypt-cli-2.2.0-linux-x86_64) |
-| ⌨️ Windows CLI | Standalone x86_64 `.exe` | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/neuron-encrypt-cli-2.2.0-windows-x86_64.exe) |
-| ⌨️ macOS CLI | Standalone Intel binary | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.2.0/neuron-encrypt-cli-2.2.0-macos-x86_64) |
+| 📦 Linux AppImage | Single self-contained file, no package manager | [Release assets ↗](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| ⌨️ Linux CLI | Standalone x86_64 binary | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.3.0/neuron-encrypt-cli-2.3.0-linux-x86_64) |
+| ⌨️ Windows CLI | Standalone x86_64 `.exe` | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.3.0/neuron-encrypt-cli-2.3.0-windows-x86_64.exe) |
+| ⌨️ macOS CLI | Standalone Intel binary | [Direct GitLab download ↗](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.3.0/neuron-encrypt-cli-2.3.0-macos-x86_64) |
 
-**No account is required.** The GUI+CLI archives and standalone CLI binaries are published through GitLab's Generic Package Registry, so users do not need a Cargo account, GitHub account, or GitHub sign-in. The Linux and Windows CLI links above are live for version `2.2.0`; the macOS link becomes live when the macOS packaging job publishes its archive.
+**No account is required.** The GUI+CLI archives and standalone CLI binaries are published through GitLab's Generic Package Registry, so users do not need a Cargo account, GitHub account, or GitHub sign-in. The Linux and Windows CLI links above are live for version `2.3.0`. A signed Android APK is attached to each GitLab release alongside the F-Droid (unsigned) build.
+
+<details>
+<summary>Install the CLI from source (needs a Rust toolchain)</summary>
+
+`cargo install` works against **crates.io**, which is independent of any GitHub account — the project's original GitHub account was banned, but that does not affect crates.io installs:
+
+```sh
+cargo install neuron-encrypt-cli
+```
+
+The published crates.io version lags behind the GitLab releases (it is at **2.1.1**), so this gives you an older build. For the current version use the prebuilt binary above, or build from the GitLab repository itself:
+
+```sh
+# Linux / macOS — compiles from source, needs Rust and the eframe GUI dependencies
+cargo install --git https://gitlab.com/theredhacker0345/neuron-encrypt --tag v2.3.0 -p neuron-encrypt-cli
+```
+
+`-p` is required because the repository root is a workspace containing both binaries. The CLI itself has no GUI dependencies, so this works on a headless box.
+
 
 ### One-line install (recommended)
 
@@ -108,7 +145,7 @@ Both scripts verify the SHA-256 hash before running. [View the Linux installer s
 <summary>Manual install (Linux — curl + sha256sum)</summary>
 
 ```bash
-VERSION=2.2.0
+VERSION=2.3.0
 CLI_FILE="neuron-encrypt-cli-${VERSION}-linux-x86_64"
 curl -fL "https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/${CLI_FILE}" -o "$CLI_FILE"
 curl -fL "https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}/SHA256SUMS-cli-linux.txt" -o SHA256SUMS-cli-linux.txt
@@ -132,7 +169,7 @@ neuron-encrypt-cli --help
 |------|-----------|------------|---------|
 | ![Home](docs/screenshots/desktop-home.png) | ![Configure](docs/screenshots/desktop-configure.png) | ![Processing](docs/screenshots/desktop-processing.png) | ![Success](docs/screenshots/desktop-success.png) |
 
-*Real captures of the v2.2.0 desktop build — drop zone, Encrypt/Decrypt/Scrub switcher with live cipher details, cancellable progress, and the completion screen.*
+*Real captures of the desktop build — drop zone, Encrypt/Decrypt/Scrub switcher with live cipher details, cancellable progress, and the completion screen.*
 
 ### Android app
 
@@ -184,8 +221,8 @@ Scrubbing removes the metadata that leaks who/where/when — without touching yo
 |--------|---------|-------------------|
 | Images | JPEG, PNG, WebP, GIF, TIFF, BMP | EXIF + GPS, XMP, IPTC, Photoshop blocks, ICC profiles, comments, timestamps |
 | Documents | PDF, Office (`docx`/`xlsx`/`pptx`) | Author/title/dates Info dictionary, XMP streams, `docProps/*`, embedded thumbnails |
-| Audio | MP3, FLAC, OGG, WAV | ID3v1/v2, APE tags, Vorbis comments, RIFF INFO |
-| Video | MP4/MOV | iTunes/`ilst` atoms |
+| Audio | MP3, AAC, M4A, FLAC, OGG, Opus, WAV, AIFF | ID3v1/v2, APE tags, iTunes/`ilst`, Vorbis comments, RIFF INFO, IFF text chunks |
+| Video | MP4, MOV, 3GP, 3G2 | iTunes/`ilst` atoms, GPS, device and encoder tags |
 
 Guarantees:
 
@@ -244,7 +281,7 @@ This is the easiest option for Linux Mint. It does not require Rust, Cargo, a Ca
 3. Verify the archive, extract it, and install the binaries locally:
 
 ```bash
-VERSION=2.2.0
+VERSION=2.3.0
 ARCHIVE="neuron-encrypt-${VERSION}-linux-x86_64.tar.gz"
 
 # Download SHA256SUMS-linux.txt beside the archive, then verify the archive.

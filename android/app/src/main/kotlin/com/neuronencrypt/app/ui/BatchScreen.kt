@@ -292,6 +292,29 @@ fun BatchScreen(onBack: () -> Unit) {
                     password = ""
                     confirmPassword = ""
                     cancelFlag.set(false)
+                    // Tell a backgrounded user the batch finished. Summarised
+                    // counts rather than one line per file, which would be
+                    // unreadable past a handful of entries.
+                    val ok = items.count { it.status == "Success" }
+                    val failed = items.count { it.status == "Failed" }
+                    val skipped = items.count { it.status == "Skipped" }
+                    val cancelled = items.count { it.status == "Cancelled" }
+                    val verb = when (fileMode) {
+                        FileMode.Encrypt -> "Encrypted"
+                        FileMode.Decrypt -> "Decrypted"
+                        FileMode.Scrub -> "Scrubbed"
+                    }
+                    CryptoService.notifyCompleted(
+                        context,
+                        "$verb $ok of $total files",
+                        buildString {
+                            append("$ok succeeded")
+                            if (skipped > 0) append(", $skipped skipped (unsupported format)")
+                            if (failed > 0) append(", $failed failed")
+                            if (cancelled > 0) append(", $cancelled cancelled")
+                            append(".")
+                        }
+                    )
                     CryptoService.setOperationInFlight(false)
                     CryptoService.stop(context)
                 }

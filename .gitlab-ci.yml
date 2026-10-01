@@ -1,127 +1,210 @@
-# Neuron Encrypt — Parent pipeline
-# Each OS has its own standalone child pipeline under .gitlab/ci/
-# Run from GitLab UI: CI/CD > Pipelines > Run pipeline,
-# then click the play button for the OS you want to build.
+# =============================================================================
+# Neuron Encrypt — parent pipeline
+#
+# Two things happen here:
+#
+# 1. `quality` runs on every push and merge request: fmt, clippy and the test
+#    suite. Nothing ships without it. (Previously nothing ran on a push at all,
+#    so broken formatting or a clippy failure was only discovered at release
+#    time, on the tag.)
+#
+# 2. On a `vX.Y.Z` tag the `release` job fans out to three child pipelines that
+#    run in parallel — Linux, Windows, Android — and then assembles one GitLab
+#    release containing the APK, the Windows EXE, the archives and all
+#    checksums. Previously each platform was a separate top-level job that
+#    uploaded to the package registry but never attached anything to the
+#    release, and Android only fired on `main` (so tagging a release did not
+#    build the APK at all).
+#
+# The macOS job is gone. It required a self-hosted runner tagged `macos` that
+# does not exist, so it sat pending forever and could never produce an asset.
+# macOS binaries are still published to the package registry by a maintainer
+# with the appropriate runner.
+# =============================================================================
 
 stages:
+  - quality
   - build
-  - deploy
   - release
 
-pages:
-  stage: deploy
-  script:
-    - mkdir -p public
-    - cp -r docs/. public/
-    # Write latest-version.txt so install.sh / install.ps1 can resolve the
-    # current version without hard-coding it.
-    - grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2 > public/latest-version.txt
-    - echo "Pages: latest-version.txt -> $(cat public/latest-version.txt)"
-  artifacts:
+variables:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: "always"
+  CARGO_INCREMENTAL: "0"
+
+default:
+  interruptible: true
+
+# -----------------------------------------------------------------------------
+# 1. Quality gate
+# -----------------------------------------------------------------------------
+
+quality:
+  stage: quality
+  image: rust:1.88-slim
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
+  cache:
+    key:
+      files:
+        - neuron-encrypt/Cargo.lock
+      prefix: quality
     paths:
-      - public
-  pages: true
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - docs/**/*
-        - neuron-encrypt/Cargo.toml
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-    - when: manual
-      allow_failure: false
+      - .cargo-home/
+      - neuron-encrypt/target/
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends
+        pkg-config libssl-dev clang lld
+    - rustup component add rustfmt clippy
+    - cargo install cargo-audit --locked
+  script:
+    - cd neuron-encrypt
+    # --locked so CI cannot silently resolve different dependency versions than
+    # the ones the lockfile was reviewed against.
+    - cargo fmt --check
+    - cargo clippy --locked --all-targets --all-features -- -D warnings
+    - cargo test --locked --lib --release
+    - cd ..
+    - cargo audit --file neuron-encrypt/Cargo.lock
+
+# -----------------------------------------------------------------------------
+# 2. Release fan-out
+# -----------------------------------------------------------------------------
+
+# Linux, Windows and Android all build from the same source and none depends on
+# another, so they run in parallel and each is a child pipeline triggered from
+# this one job list. A single trigger point means a new platform is one entry
+# here plus one file in .gitlab/ci/.
 
 linux:
   stage: build
-  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   trigger:
     include: .gitlab/ci/linux.yml
     strategy: depend
 
 windows:
   stage: build
-  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   trigger:
     include: .gitlab/ci/windows.yml
     strategy: depend
 
-macos:
-  stage: build
-  when: manual
-  allow_failure: true   # needs a self-hosted runner tagged "macos"
-  trigger:
-    include: .gitlab/ci/macos.yml
-    strategy: depend
-
 android:
   stage: build
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   trigger:
     include: .gitlab/ci/android.yml
     strategy: depend
-  rules:
-    # Auto-build on every version tag so the APK is ready when create-release runs
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-    # Also available as a manual trigger on any branch
-    - when: manual
-      allow_failure: true
 
-# ── GitLab Release (fires automatically on every vX.Y.Z tag) ──────────────────
+# -----------------------------------------------------------------------------
+# 3. Assemble the release
+# -----------------------------------------------------------------------------
+#
+# `needs: []` with all three triggers above makes this wait for every platform
+# to finish (including via `strategy: depend`, which propagates a child
+# failure), while still running in parallel with nothing else.
+#
+# Assets are attached as direct release links rather than only being pushed to
+# the package registry, so a user visiting the release page can download
+# everything without knowing the registry URL layout.
+
 create-release:
   stage: release
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  image: alpine:3.20
+  needs: [linux, windows, android]
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-  needs:
-    - job: android
-      optional: true   # don't block release if android runner is unavailable
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   variables:
-    VERSION: "$CI_COMMIT_TAG"   # e.g. v2.2.0
+    # GitLab expands ${VAR} but not shell parameter expansion like ${VAR#v},
+    # so the prefix is stripped in the script and the result is exported.
+    PACKAGE_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic"
   script:
-    # Strip leading "v" for the package registry version string
-    - VER="${VERSION#v}"
-    - PROJ="${CI_PROJECT_URL}"
-    - API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic"
-    - echo "Creating release for $VERSION (package version $VER)"
-  release:
-    tag_name: "$CI_COMMIT_TAG"
-    name: "Neuron Encrypt $CI_COMMIT_TAG"
-    description: |
-      See [CHANGELOG.md](${CI_PROJECT_URL}/-/blob/main/CHANGELOG.md) for details.
+    - apk add --no-cache curl jq
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - echo "Assembling release $VERSION for tag $CI_COMMIT_TAG"
 
-      ### One-line install
+    # Collect the artifacts uploaded by the child pipelines. The registry API
+    # lists files per package, which is more robust than reconstructing
+    # filenames here.
+    - |
+      build_assets() {
+        pkg="$1"; out="$2"
+        curl --fail --silent --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+          "${PACKAGE_URL}?package_name=${pkg}&package_version=${VERSION}&per_page=100" \
+          | jq -r '.[].file_name' > "$out" || true
+      }
+      build_assets neuron-encrypt app-assets.txt
+      build_assets neuron-encrypt-cli cli-assets.txt
+      echo "--- desktop ---"; cat app-assets.txt
+      echo "--- cli ---"; cat cli-assets.txt
 
-      **Linux / macOS**
-      ```sh
-      curl -fsSL https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh | sh
-      ```
+    # Collect the APK, which the Android pipeline published under its own name.
+    - |
+      curl --fail --silent --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+        "${PACKAGE_URL}?package_name=neuron-encrypt-android&package_version=${VERSION}&per_page=100" \
+        | jq -r '.[].file_name' > apk-assets.txt || true
+      echo "--- android ---"; cat apk-assets.txt
 
-      **Windows (PowerShell)**
-      ```powershell
-      irm https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1 | iex
-      ```
+    - echo "Creating GitLab release $VERSION"
+    - |
+      # Build the asset list as JSON: [{name, url, link_type: "package"}].
+      # Package-registry links are stable and never expire, which is what the
+      # installers resolve against.
+      {
+        echo '{"assets":['
+        first=1
+        for f in $(cat app-assets.txt cli-assets.txt apk-assets.txt 2>/dev/null); do
+          case "$f" in .gitkeep|*.md) continue ;; esac
+          case "$f" in
+            neuron-encrypt-android*) pkg="neuron-encrypt-android" ;;
+            neuron-encrypt-cli*)    pkg="neuron-encrypt-cli" ;;
+            *)                      pkg="neuron-encrypt" ;;
+          esac
+          [ $first -eq 1 ] || echo ','
+          first=0
+          printf '  {"name":"%s","url":"%s/%s/%s/%s","link_type":"package"}' \
+            "$f" "$PACKAGE_URL" "$pkg" "$VERSION" "$f"
+        done
+        echo ']}'
+      } > assets.json
+      cat assets.json
 
-      ### Direct binary downloads
+    - |
+      curl --fail --request POST \
+        --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --data @assets.json \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases?version=${VERSION}&name=Neuron%20Encrypt%20${VERSION}" \
+        | jq -r '.tag_name, .released_at, (.assets[] | "  asset: \(.name)")'
 
-      See the [Package Registry](${CI_PROJECT_URL}/-/packages) for all platform archives.
-    assets:
-      links:
-        - name: "Linux x86_64 CLI binary"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${CI_COMMIT_TAG#v}/neuron-encrypt-cli-${CI_COMMIT_TAG#v}-linux-x86_64"
-          link_type: "package"
-        - name: "Windows x86_64 CLI binary (.exe)"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt-cli/${CI_COMMIT_TAG#v}/neuron-encrypt-cli-${CI_COMMIT_TAG#v}-windows-x86_64.exe"
-          link_type: "package"
-        - name: "Linux x86_64 full archive (.tar.gz)"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${CI_COMMIT_TAG#v}/neuron-encrypt-${CI_COMMIT_TAG#v}-linux-x86_64.tar.gz"
-          link_type: "package"
-        - name: "Windows x86_64 full archive (.zip)"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${CI_COMMIT_TAG#v}/neuron-encrypt-${CI_COMMIT_TAG#v}-windows-x86_64.zip"
-          link_type: "package"
-        - name: "Android APK (unsigned — sideload or F-Droid)"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/neuron-encrypt/${CI_COMMIT_TAG#v}/neuron-encrypt-${CI_COMMIT_TAG#v}-android.apk"
-          link_type: "package"
-        - name: "install.sh (Linux/macOS one-liner)"
-          url: "https://theredhacker0345.gitlab.io/neuron-encrypt/install.sh"
-          link_type: "runbook"
-        - name: "install.ps1 (Windows one-liner)"
-          url: "https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1"
-          link_type: "runbook"
+# -----------------------------------------------------------------------------
+# 4. Pages — the website, the installers and the version pointer
+# -----------------------------------------------------------------------------
+#
+# Serves install.sh / install.ps1 and `latest-version.txt`, which the
+# one-line install commands resolve against. Runs on `main` so a merge updates
+# the site without waiting for a release.
+
+pages:
+  stage: release
+  image: alpine:3.20
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  script:
+    - mkdir -p public
+    - cp -r docs/* public/ 2>/dev/null || true
+    - cp docs/install.sh public/install.sh 2>/dev/null || true
+    - cp docs/install.ps1 public/install.ps1 2>/dev/null || true
+    - |
+      # The installers read this to pick a version without hardcoding one.
+      # Derive it from the crate manifest so it can never drift from a release.
+      grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2 \
+        > public/latest-version.txt
+      cat public/latest-version.txt
+  artifacts:
+    paths:
+      - public
+    expire_in: "1 year"

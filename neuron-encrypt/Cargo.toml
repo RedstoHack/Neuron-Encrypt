@@ -1,6 +1,6 @@
 [package]
 name = "neuron-encrypt"
-version = "2.2.0"
+version = "2.3.0"
 edition = "2021"
 description = "Military-grade file encryption — AES-256-GCM-SIV · Argon2id · HKDF-SHA512"
 license = "GPL-3.0-only"

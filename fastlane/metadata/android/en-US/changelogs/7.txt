@@ -1,0 +1,5 @@
+Metadata scrubbing for M4A/AAC, Opus, AIFF and 3GP/3G2, plus a new in-app list of supported formats.
+
+Fixes three cases where a truncated PNG, WebP or GIF was reported as successfully scrubbed and could replace the original with a corrupt file.
+
+Fixes the stuck foreground notification that could not be dismissed until the app was force-stopped.

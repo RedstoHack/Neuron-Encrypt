@@ -16,6 +16,11 @@ Description: |-
   * Argon2id at 256 MiB memory cost — GPU brute-force resistant
   * Authenticated header (V4 format) — tamper detection on every chunk
   * Streams any file size at constant ~258 MB RAM
+  * Metadata scrubbing — strips EXIF/GPS, XMP, ID3 and document properties from
+    photos (JPEG, PNG, WebP, GIF, BMP, TIFF), PDFs, Office documents, audio
+    (MP3, AAC, M4A, FLAC, OGG, Opus, WAV, AIFF) and video (MP4, MOV, 3GP),
+    entirely on-device
+  * Batch processing for both encryption and scrubbing
   * Zero network permissions — fully offline
   * Atomic writes — no partial files on crash
   * Memory hygiene — keys and plaintext zeroed after use
@@ -53,7 +58,103 @@ Builds:
     output: app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
     Reproducible: false
 
+  - versionName: "2.1.1"
+    versionCode: 4
+    commit: v2.1.1
+    subdir: android
+    gradle:
+      - fdroidRelease
+    prebuild: |
+      rustup target add \
+        aarch64-linux-android \
+        armv7-linux-androideabi \
+        x86_64-linux-android \
+        i686-linux-android
+      cargo install cargo-ndk --version "^3"
+      cd neuron-encrypt-jni && \
+      cargo ndk --platform 24 \
+        -t arm64-v8a \
+        -t armeabi-v7a \
+        -t x86_64 \
+        -t x86 \
+        -o ../app/src/main/jniLibs \
+        build --release
+    output: app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
+    Reproducible: false
+
+  - versionName: "2.1.2"
+    versionCode: 5
+    commit: v2.1.2
+    subdir: android
+    gradle:
+      - fdroidRelease
+    prebuild: |
+      rustup target add \
+        aarch64-linux-android \
+        armv7-linux-androideabi \
+        x86_64-linux-android \
+        i686-linux-android
+      cargo install cargo-ndk --version "^3"
+      cd neuron-encrypt-jni && \
+      cargo ndk --platform 24 \
+        -t arm64-v8a \
+        -t armeabi-v7a \
+        -t x86_64 \
+        -t x86 \
+        -o ../app/src/main/jniLibs \
+        build --release
+    output: app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
+    Reproducible: false
+
+  - versionName: "2.2.0"
+    versionCode: 6
+    commit: v2.2.0
+    subdir: android
+    gradle:
+      - fdroidRelease
+    prebuild: |
+      rustup target add \
+        aarch64-linux-android \
+        armv7-linux-androideabi \
+        x86_64-linux-android \
+        i686-linux-android
+      cargo install cargo-ndk --version "^3"
+      cd neuron-encrypt-jni && \
+      cargo ndk --platform 24 \
+        -t arm64-v8a \
+        -t armeabi-v7a \
+        -t x86_64 \
+        -t x86 \
+        -o ../app/src/main/jniLibs \
+        build --release
+    output: app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
+    Reproducible: false
+
+  - versionName: "2.3.0"
+    versionCode: 7
+    commit: v2.3.0
+    subdir: android
+    gradle:
+      - fdroidRelease
+    prebuild: |
+      rustup target add \
+        aarch64-linux-android \
+        armv7-linux-androideabi \
+        x86_64-linux-android \
+        i686-linux-android
+      cargo install cargo-ndk --version "^3"
+      cd neuron-encrypt-jni && \
+      cargo ndk --platform 24 \
+        -t arm64-v8a \
+        -t armeabi-v7a \
+        -t x86_64 \
+        -t x86 \
+        -o ../app/src/main/jniLibs \
+        build --release
+    output: app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk
+    Reproducible: false
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: "2.1.0"
-CurrentVersionCode: 3
+CurrentVersion: "2.3.0"
+CurrentVersionCode: 7

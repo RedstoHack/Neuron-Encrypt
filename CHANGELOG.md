@@ -5,6 +5,31 @@ All notable changes to Neuron Encrypt are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-10-01
+
+### Added
+- **Metadata scrubbing for M4A/AAC, Opus, AIFF and 3GP/3G2.** All four are handled by the `lofty` tag writer that was already a dependency, so they cost only detection changes: ADTS/ADIF AAC is now told apart from MPEG audio by the frame layer bits (previously any `0xFF 0xEx` frame was assumed MP3), Opus is distinguished from Ogg Vorbis by the `OpusHead` codec id, AIFF/AIFC is recognised by its `FORM`+`AIFF` container, and the 3GPP/3GPP2 and Apple `M4B`/`M4P` brands are reported as their own format so the cleaned copy keeps a matching extension instead of being written as `.mp4`.
+- **A "Supported formats" screen in the Android app**, listing every scrubbable format and what is removed from it, plus the formats that are deliberately rejected (HEIC/HEIF, camera RAW, archives) and why. Reachable from the home screen so a user can check support *before* picking a file rather than only from an error message.
+- **Adversarial test suite for the scrubber** (`metadata/brutal.rs`): 14 tests covering zero-byte/truncated/garbage inputs, magic-byte lookalikes, a byte-by-byte truncation sweep of every supported container, payload-integrity assertions, symlink and read-only handling, cancellation, and concurrent scrubs racing for one destination.
+
+### Fixed
+- **A truncated PNG was reported as successfully scrubbed and replaced the original with a corrupt stub.** The chunk loop could run out of data rather than reach `IEND`; when the file happened to end exactly on a chunk boundary, `pos == data.len()` passed the trailing-bytes check and the scrub "succeeded" — producing a header-only file with no image data. Under `--in-place` this destroyed the user's photo. The scrubber now requires an `IEND` chunk.
+- **Same class of bug in WebP and GIF.** WebP accepted a file with no `VP8`/`VP8L`/`VP8X` chunk (i.e. no image at all), and GIF accepted a file containing no image descriptor or no trailer. Both now fail closed with a specific error.
+- **Android: the ongoing notification survived completion and could not be dismissed.** Progress ticks are posted directly through `NotificationManagerCompat` under the same id as the foreground notification, but teardown only called `stopForeground(REMOVE)` — which removes the notification the *service* attached, not one posted behind its back. A tick that landed after teardown therefore re-created an ongoing notification belonging to no service, which the user could not swipe away and which survived until the app was force-stopped. `stop()`/`onDestroy()`/`onTaskRemoved` now cancel the notification by id, `updateProgress()` ignores ticks once the operation is no longer in flight, and `start()` clears any stale entry left by a killed run.
+- **Android: batch runs left no completion notice.** A multi-file batch finished silently for a backgrounded user; it now posts a counted summary.
+- **`--force` still deleted the destination up front at the CLI layer**, leaving the data-loss window that the core had just been hardened against. Neither CLI path deletes up front any more: `encrypt`/`decrypt` rely on the core's atomic replace, and `scrub` threads `--force` into `metadata::scrub_file` as a new `overwrite` argument.
+
+### Changed
+- **Version bump** 2.2.0 → 2.3.0 (core + JNI crates, Android `versionName`), Android `versionCode` 6 → 7.
+- The NSIS installer takes its version from a `!define`, so releases no longer need a manual edit.
+- F-Droid metadata brought up to date: builds added for version codes 4–7 and `CurrentVersion` corrected from the long-stale 2.1.0/3.
+- CI: a `quality` gate job (fmt, clippy `-D warnings`, tests) now runs on every push and merge request, and releases are produced by a single tag-triggered pipeline that builds Linux, Windows and Android in parallel and attaches every artifact (APK, EXE, archives, checksums) to the GitLab release. The macOS job is removed — it required a self-hosted runner that does not exist, so it only ever sat pending.
+
+### Test Results
+- `cargo test --lib --release`: 86/86 pass (was 63; +3 from the truncation fixes, +14 adversarial, +6 from the new formats).
+- `cargo fmt --check` and `cargo clippy --all-targets --all-features -D warnings`: clean.
+- Android `:app:compileStandardDebugKotlin` and `:app:compileFdroidDebugKotlin`: clean.
+
 ## [Unreleased]
 
 ### Fixed
