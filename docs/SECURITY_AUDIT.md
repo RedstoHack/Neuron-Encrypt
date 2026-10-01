@@ -185,7 +185,7 @@ Stage Summary:
 - **Description**: Parameters: m=262144 KiB (256 MiB), t=3 iterations, p=4 lanes, output=64 bytes. RFC 9106 §4 (First Recommendation) suggests m=2 GiB / t=3 / p=4 / 32-byte output for "Argon2id". The code uses 1/8 of that memory (256 MiB) but produces 64-byte output (vs 32). OWASP Password Storage Cheat Sheet recommends Argon2id with m≥19 MiB, t≥2, p≥1 — the code exceeds all three. The 256 MiB memory cost is at the upper end of what desktop/mobile devices can tolerate (~0.5-1 sec latency), striking a reasonable usability/security balance.
 - **Impact**: None. Confirmed safe.
 - **Verification**: Read both KDF functions; cross-referenced RFC 9106 and OWASP guidance.
-- **Suggested fix**: None required. (Note: `SECURITY_DEFER.md` says 64 MiB but is stale — main branch is 256 MiB as the prompt confirmed.)
+- **Suggested fix**: None required. (Note: `docs/SECURITY_DEFER.md` says 64 MiB but is stale — main branch is 256 MiB as the prompt confirmed.)
 - **Confidence**: High (confirmed safe)
 
 ### [INFO] Finding 5-19: HKDF info strings provide strong domain separation between V2 and V3

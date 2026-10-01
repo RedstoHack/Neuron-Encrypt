@@ -1,8 +1,12 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Uploads the Android APK + checksum to the Generic Package Registry and
 # prints the stable (never-expiring) product link.
 # Usage: publish-android.sh <apk-filename> <version>
-set -euo pipefail
+#
+# POSIX sh, not bash: this runs in the alpine:3.20 packaging job, which has no
+# bash installed. Invoking it via `bash script.sh` there failed with
+# "bash: not found" (exit 127).
+set -eu
 
 APK_NAME="${1:?Usage: publish-android.sh <apk-filename> <version>}"
 VERSION="${2:?Usage: publish-android.sh <apk-filename> <version>}"
@@ -18,7 +22,7 @@ curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$APK_NAME" \
   "$LATEST_BASE/neuron-encrypt-latest-android.apk" \
   || echo "WARN: latest alias upload failed (registry disabled?)"
 curl --fail -H "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file SHA256SUMS-android.txt \
-  "$LATEST_BASE/SHA256SUMS-android.txt" || true
+  "$LATEST_BASE/SHA256SUMS.txt" || true
 
 echo ""
 echo "==============================================================="

@@ -13,7 +13,7 @@ AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 [![F-Droid](https://img.shields.io/badge/F--Droid-available-22c55e?style=flat-square&logo=f-droid)](https://f-droid.org/packages/com.neuronencrypt.app/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-6366f1?style=flat-square)](#download)
 [![Tests](https://img.shields.io/badge/tests-38%20passing-22c55e?style=flat-square)](#security)
-[![Audit](https://img.shields.io/badge/audit-0%20critical%20%7C%200%20high-22c55e?style=flat-square)](SECURITY_AUDIT.md)
+[![Audit](https://img.shields.io/badge/audit-0%20critical%20%7C%200%20high-22c55e?style=flat-square)](docs/SECURITY_AUDIT.md)
 
 [**Download**](#download) · [**Website**](https://theredhacker0345.gitlab.io/neuron-encrypt/) · [**Security**](#security) · [**Docs**](#how-it-works) · [**FAQ**](#faq)
 
@@ -55,38 +55,15 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 - **Fixed: the Android notification that would not go away.** After a finished operation an ongoing notification sometimes stayed in the shade and could not be swiped away — it survived until the app was force-stopped from Settings. Progress updates bypassed the service, so `stopForeground()` could not remove them; they are now cancelled by id on every teardown path, and a late progress tick can no longer resurrect one.
 - **Android: batch runs report completion.** A multi-file batch finished silently for a backgrounded user; it now posts a counted summary.
 - **An in-app list of supported formats** so you can check before picking a file, and see exactly what is removed.
-- **A CI quality gate** runs `fmt`, `clippy -D warnings` and the full test suite on every push and merge request — previously nothing ran until a release tag.
-- **One release pipeline.** Pushing a `vX.Y.Z` tag builds Linux, Windows and Android in parallel and attaches the APK, the Windows EXE, the archives and all checksums to a single GitLab release. The macOS job is removed: it needed a self-hosted runner that does not exist, so it only ever sat pending.
+- **Fixed: `webbrowser` 1.2.1 advisory (RUSTSEC-2026-0257)** — allowed argument injection through the Unix `BROWSER` variable. Bumped to 1.2.4.
 - **An AppImage for Linux**, alongside the tar.gz.
-- **F-Droid metadata corrected** — builds for version codes 4–7 added and `CurrentVersion` fixed from the long-stale 2.1.0/3.
+- **Release engineering**: a CI quality gate (`fmt`, `clippy -D warnings`, tests, `cargo audit`) now runs on every push, and a single `vX.Y.Z` tag builds Linux, Windows and Android in parallel and attaches the APK, EXE, archives and checksums to one release. The macOS job is removed — it needed a runner that does not exist. F-Droid metadata is corrected from its long-stale 2.1.0/3.
 
 Tests: **86/86 pass** (63 at 2.2.0), with 14 new adversarial tests covering zero-byte, truncated, garbage and lookalike inputs, a byte-by-byte truncation sweep of every supported container, symlinks, cancellation and concurrent scrubs.
 
 ---
 
-## What's new in 2.2.0
-
-- **New: metadata scrubbing on every platform** — strip EXIF/GPS, XMP, IPTC, ID3 tags and document properties from photos, PDFs, office documents and audio/video files. One Rust engine powers the GUI (new **Scrub** mode), the CLI (`neuron-encrypt-cli scrub`), and the Android app (new **Scrub** tab, single-file and batch).
-- **Cleaned copies, never surprises** — output is written atomically as `photo.clean.jpg` beside your original; the source is never modified unless you explicitly ask for in-place replacement. Unsupported formats are rejected loudly instead of being copied silently.
-- **Flat memory profile** — the Android engine stages files through app-private cache storage with a fixed 1 MiB buffer (never loads whole files into RAM), guarded by a free-space check before it starts.
-- **Fixed**: an Android bug where cancelling during a chunk write could hang the worker (latent since 2.1.2), and an fd-leak edge case when the destination picker throws.
-
----
-
-## What's new in 2.1.2
-
-- **Fixed: empty files from Drive/cloud storage** — Android no longer detaches the file descriptor before encryption finishes, so files from remote storage (Drive, etc.) come out intact instead of 0 bytes. Native code now duplicates the fd and owns its own copy, so the app can never report "done" while data is still being flushed.
-- **Cleaner Android back navigation** — the new predictive-back callback is enabled, removing a warning in recent Android versions.
-
----
-
-## What's new in 2.1.1
-
-- **No more hangs on older phones** — crypto runs on a background dispatcher and provider metadata lookups (`getFileInfo` / `detectMagicBytes`) moved off the UI thread, so slow/remote storage (e.g. Drive) can't freeze or ANR the app.
-- **100% means done** — the Android JNI `fsync`s before reporting completion, so the app never claims finished while data is still being written back to slow storage.
-- **Batch survives backgrounding** — batch operations now run under a foreground service with notification progress, just like single-file operations.
-- **Cleaner cancel UX** — cancelling shows a neutral "Operation cancelled" notice instead of a red error.
-- **Tighter passphrase hygiene** — passphrase byte arrays are zeroed in `finally` on top of the native-side zeroing.
+Older releases are documented in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -213,7 +190,7 @@ Your passphrase is held in memory only long enough to derive the key via Argon2i
 
 ---
 
-## Metadata scrubbing (new in 2.2.0)
+## Metadata scrubbing
 
 Scrubbing removes the metadata that leaks who/where/when — without touching your file's contents.
 
@@ -264,7 +241,7 @@ Guarantees:
 - ❌ Weak passphrases (strength meter is advisory, not enforced)
 - ❌ Metadata leakage (file names, sizes, timestamps are visible)
 
-**Full audit:** 44 findings, 0 CRITICAL, 0 HIGH, 9 MEDIUM (all fixed), 10 LOW, 25 INFO. See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) and [CHANGELOG.md](CHANGELOG.md).
+**Full audit:** 44 findings, 0 CRITICAL, 0 HIGH, 9 MEDIUM (all fixed), 10 LOW, 25 INFO. See [SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -450,9 +427,14 @@ Neuron-Encrypt/
 │   ├── neuron-encrypt-jni/  # Rust JNI bridge
 │   └── build-rust.sh        # Cross-compile 4 ABIs
 ├── installer/               # NSIS Windows installer
-├── docs/                    # Website (GitLab Pages)
-├── fastlane/                # F-Droid metadata
-├── SECURITY_AUDIT.md        # Full audit report (44 findings)
+├── docs/                    # Website, audits, release notes, CI/CD reference
+│   ├── index.html           # GitLab Pages site
+│   ├── install.sh/.ps1      # One-line installers
+│   ├── SECURITY_AUDIT.md    # Full audit report (44 findings)
+│   ├── CI_CD.md             # Pipeline reference
+│   └── releases/            # Per-version release notes
+├── fastlane/                # F-Droid / Play metadata
+├── metadata/                # F-Droid build definitions
 ├── CHANGELOG.md             # Version history
 └── README.md                # This file
 ```

@@ -255,10 +255,10 @@
             <div class="scrub-row clean"><span>photo.clean.jpg</span><code>pixels identical · 0 tags</code></div>
           </div>
           <div class="panel-copy">
-            <h3>New in 2.2.0 — strip the invisible leak</h3>
+            <h3>Strip the invisible leak</h3>
             <p>Photos, PDFs, Office docs, and audio carry who, where, and when. Scrub writes a cleaned copy beside the original — the source is never touched unless you opt into in-place mode.</p>
             <ul class="check-list">
-              <li>JPEG · PNG · WebP · GIF · TIFF · PDF · docx · MP3 · FLAC · MP4…</li>
+              <li>18 formats — JPEG, PNG, WebP, GIF, TIFF, PDF, Office, MP3, AAC, M4A, FLAC, Opus, AIFF, MP4, 3GP…</li>
               <li>Fail-closed: unknown formats abort loudly</li>
               <li>Flat 1 MiB memory profile on mobile</li>
             </ul>
@@ -355,7 +355,7 @@
       <div class="section-shell">
         <div class="section-intro split-intro">
           <div>
-            <p class="section-kicker reveal">New in 2.2.0</p>
+            <p class="section-kicker reveal">Metadata scrubbing</p>
             <h2 id="scrub-title" class="reveal">Your photos confess.<br /><em>Scrub them clean.</em></h2>
           </div>
           <p class="section-lead reveal">Every JPEG carries a diary: GPS coordinates, camera serial, timestamps. Scrub rewrites the container without touching a single pixel — then proves it.</p>
@@ -422,7 +422,7 @@
       <div class="audit-callout reveal">
         <div class="audit-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z"></path><path d="m8.5 12 2.2 2.2 4.8-5"></path></svg></div>
         <div><strong>Published audit — 44 findings, 0 critical, 0 high</strong><span>9 medium, all fixed · 10 low · 25 info · full report in-repo</span></div>
-        <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/SECURITY_AUDIT.md" target="_blank" rel="noopener">Read the report <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7"></path><path d="M8 7h9v9"></path></svg></a>
+        <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/docs/SECURITY_AUDIT.md" target="_blank" rel="noopener">Read the report <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7"></path><path d="M8 7h9v9"></path></svg></a>
       </div>
 
       <div class="compare-wrap reveal">
@@ -535,11 +535,7 @@ neuron-encrypt-cli-2.3.0-windows-x86_64.exe --help
         <h2 id="changelog-title" class="reveal">Shipped, <em>tested,</em> documented.</h2>
       </div>
       <ol class="timeline">
-        <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.3.0</span><div><strong>Four more formats, three corruption fixes</strong><p>Scrubbing added for AAC, M4A, Opus, AIFF and 3GP/3G2 — 18 formats total. A truncated PNG, WebP or GIF was being reported as successfully scrubbed and could replace the original with a corrupt stub; all three now fail closed. Fixed the Android notification that could not be dismissed until the app was force-stopped. 86/86 tests.</p><span class="timeline-date">2026-10-01</span></div></li>
-        <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.2.0</span><div><strong>Metadata scrubbing everywhere</strong><p>One Rust engine for GUI, CLI, and Android. 63/63 tests green, clippy &amp; fmt clean. Fixed an Android mid-chunk cancel spin and an fd-leak edge.</p><span class="timeline-date">2026-08-23</span></div></li>
-        <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.1.2</span><div><strong>Drive files arrive intact</strong><p>JNI no longer detaches the fd early — remote providers stop producing 0-byte outputs. Predictive-back warning removed.</p><span class="timeline-date">2026-08-10</span></div></li>
-        <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.1.1</span><div><strong>No more ANRs on older phones</strong><p>Crypto moved off the UI thread, fsync before 100%, batch under a foreground service, neutral cancel state.</p><span class="timeline-date">2026-08-03</span></div></li>
-        <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.1.0</span><div><strong>VAULTX04 + hardened Android</strong><p>Header-authenticated streaming format, cancel buttons, wipe confirmations, 38 tests, manifest hardening.</p><span class="timeline-date">2026-07-16</span></div></li>
+        <li class="timeline-item reveal"><span class="timeline-ver" translate="no">2.3.0</span><div><strong>Four more formats, three corruption fixes</strong><p>Scrubbing added for AAC, M4A, Opus, AIFF and 3GP/3G2 — 18 formats total. A truncated PNG, WebP or GIF was being reported as successfully scrubbed and could replace the original with a corrupt stub; all three now fail closed. Fixed the Android notification that could not be dismissed until the app was force-stopped, and a browser-argument injection advisory. 86/86 tests.</p><span class="timeline-date">2026-10-01</span></div></li>
       </ol>
     </section>
 
@@ -606,7 +602,7 @@ neuron-encrypt-cli-2.3.0-windows-x86_64.exe --help
         <a href="https://gitlab.com/theredhacker0345/neuron-encrypt" target="_blank" rel="noopener">Source</a>
         <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/releases" target="_blank" rel="noopener">Releases</a>
         <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/packages" target="_blank" rel="noopener">Packages</a>
-        <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/SECURITY_AUDIT.md" target="_blank" rel="noopener">Audit</a>
+        <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/docs/SECURITY_AUDIT.md" target="_blank" rel="noopener">Audit</a>
         <a href="https://gitlab.com/theredhacker0345/neuron-encrypt/-/blob/main/LICENSE" target="_blank" rel="noopener">GPLv3</a>
       </nav>
       <p class="footer-meta">Made with Rust · No cookies · No analytics · Hosted on <a href="https://gitlab.com/theredhacker0345/neuron-encrypt" target="_blank" rel="noopener">GitLab Pages</a> · © <span id="year">2026</span></p>
