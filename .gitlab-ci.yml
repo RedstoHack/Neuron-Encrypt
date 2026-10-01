@@ -109,7 +109,14 @@ quality:
           fi
         fi
       fi
-      command -v "$want" >/dev/null 2>&1 || cargo install "$want" --locked
+      # The cached $CARGO_HOME may already list the package from a previous run
+      # even though the binary is gone, so clear the record and force: without
+      # this the fallback dies with "binary `cargo-audit` already exists in
+      # destination" (exit 101).
+      command -v "$want" >/dev/null 2>&1 || {
+        cargo uninstall "$want" >/dev/null 2>&1 || true
+        cargo install "$want" --locked --force
+      }
     - cargo audit --version
   script:
     - cd neuron-encrypt
