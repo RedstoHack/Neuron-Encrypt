@@ -200,27 +200,52 @@ create-release:
     - VERSION="${CI_COMMIT_TAG#v}"
     - echo "Assembling release $VERSION for tag $CI_COMMIT_TAG"
 
-    # Collect the artifacts uploaded by the child pipelines. The registry API
-    # lists files per package, which is more robust than reconstructing
-    # filenames here.
+    # The asset list is built from the filenames the packaging jobs publish,
+    # and each is confirmed with a HEAD request before being attached.
+    #
+    # An earlier version asked the registry to list a package's files and
+    # parsed the result with jq. That listing returned nothing for all three
+    # packages, so the release was POSTed with an empty asset array and GitLab
+    # rejected it with a 400 — while every artifact was in fact published and
+    # downloadable. Explicit names plus a reachability check cannot silently
+    # produce an empty list, and a missing artifact is reported by name.
     - |
-      build_assets() {
-        pkg="$1"; out="$2"
-        curl --fail --silent --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-          "${PACKAGE_URL}?package_name=${pkg}&package_version=${VERSION}&per_page=100" \
-          | jq -r '.[].file_name' > "$out" || true
+      add() {
+        pkg="$1"; file="$2"
+        url="${PACKAGE_URL}/${pkg}/${VERSION}/${file}"
+        if curl --fail --silent --head "$url" >/dev/null 2>&1; then
+          echo "$file|$url"
+        else
+          echo "WARN: not published, skipping $file" >&2
+        fi
       }
-      build_assets neuron-encrypt app-assets.txt
-      build_assets neuron-encrypt-cli cli-assets.txt
-      echo "--- desktop ---"; cat app-assets.txt
-      echo "--- cli ---"; cat cli-assets.txt
 
-    # Collect the APK, which the Android pipeline published under its own name.
-    - |
-      curl --fail --silent --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-        "${PACKAGE_URL}?package_name=neuron-encrypt-android&package_version=${VERSION}&per_page=100" \
-        | jq -r '.[].file_name' > apk-assets.txt || true
-      echo "--- android ---"; cat apk-assets.txt
+      {
+        # Desktop: Linux tar.gz, Linux AppImage, and their checksums.
+        add neuron-encrypt "neuron-encrypt-${VERSION}-linux-x86_64.tar.gz"
+        add neuron-encrypt "neuron-encrypt-${VERSION}-linux-x86_64.AppImage"
+        add neuron-encrypt "SHA256SUMS-linux.txt"
+        add neuron-encrypt "SHA256SUMS-appimage.txt"
+
+        # Windows: GUI+CLI zip and the standalone CLI.
+        add neuron-encrypt "neuron-encrypt-${VERSION}-windows-x86_64.zip"
+        add neuron-encrypt-cli "neuron-encrypt-cli-${VERSION}-windows-x86_64.exe"
+        add neuron-encrypt-cli "SHA256SUMS-cli-windows.txt"
+        add neuron-encrypt-cli "SHA256SUMS-windows.txt"
+
+        # Linux CLI.
+        add neuron-encrypt-cli "neuron-encrypt-cli-${VERSION}-linux-x86_64"
+        add neuron-encrypt-cli "SHA256SUMS-cli-linux.txt"
+
+        # macOS CLI (published by a maintainer runner; absent is not fatal).
+        add neuron-encrypt-cli "neuron-encrypt-cli-${VERSION}-macos-x86_64"
+        add neuron-encrypt-cli "SHA256SUMS-cli-macos.txt"
+
+        # Android: unsigned (F-Droid) and signed APKs.
+        add neuron-encrypt "neuron-encrypt-${VERSION}-android.apk"
+        add neuron-encrypt-android "neuron-encrypt-${VERSION}-android-signed.apk"
+      } > assets.txt
+      cat assets.txt
 
     - echo "Creating GitLab release $VERSION"
     - |
@@ -230,21 +255,21 @@ create-release:
       {
         echo '{"assets":['
         first=1
-        for f in $(cat app-assets.txt cli-assets.txt apk-assets.txt 2>/dev/null); do
-          case "$f" in .gitkeep|*.md) continue ;; esac
-          case "$f" in
-            neuron-encrypt-android*) pkg="neuron-encrypt-android" ;;
-            neuron-encrypt-cli*)    pkg="neuron-encrypt-cli" ;;
-            *)                      pkg="neuron-encrypt" ;;
-          esac
+        while IFS='|' read -r name url; do
+          [ -n "$name" ] || continue
           [ $first -eq 1 ] || echo ','
           first=0
-          printf '  {"name":"%s","url":"%s/%s/%s/%s","link_type":"package"}' \
-            "$f" "$PACKAGE_URL" "$pkg" "$VERSION" "$f"
-        done
+          printf '  {"name":"%s","url":"%s","link_type":"package"}' "$name" "$url"
+        done < assets.txt
         echo ']}'
       } > assets.json
       cat assets.json
+      count=$(grep -c '"name"' assets.json || true)
+      echo "attaching $count asset(s)"
+      if [ "$count" -eq 0 ]; then
+        echo "ERROR: no assets found; refusing to create an empty release" >&2
+        exit 1
+      fi
 
     - |
       curl --fail --request POST \
