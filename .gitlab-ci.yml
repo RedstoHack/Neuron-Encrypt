@@ -74,26 +74,38 @@ quality:
         pkg-config libssl-dev clang lld curl ca-certificates
     - rustup component add rustfmt clippy
     # Prebuilt cargo-audit. `cargo install cargo-audit` compiles ~200 crates and
-    # was a large share of this job's wall clock. rustsec publishes
-    # x86_64-unknown-linux-gnu tarballs under `cargo-audit/vX.Y.Z` release
-    # tags; the tag is resolved from the API so this does not rot, with
-    # `cargo install` kept as a fallback if the layout ever changes.
+    # was a large share of this job's wall clock.
+    #
+    # The *musl* build specifically: the -gnu build is dynamically linked
+    # against glibc 2.39 and dies with "version `GLIBC_2.39' not found" on the
+    # bookworm-based rust:1.88-slim image. The musl build is static and runs
+    # anywhere. The tag is resolved from the API so this does not rot, and the
+    # binary is executed before being trusted, with `cargo install` as fallback.
     - |
       set -e
       want="cargo-audit"
+      # A cold cache has no $CARGO_HOME/bin at all; the first run must create it
+      # or the cp below fails with "No such file or directory".
+      mkdir -p "$CARGO_HOME/bin"
       if ! command -v "$want" >/dev/null 2>&1; then
         url=$(curl -sSfL https://api.github.com/repos/rustsec/rustsec/releases \
           | grep -o '"tag_name": *"cargo-audit/v[0-9][^"]*"' | head -1 \
           | cut -d'"' -f4)
         if [ -n "$url" ]; then
           ver="${url#cargo-audit/v}"
-          asset="cargo-audit-x86_64-unknown-linux-gnu-v${ver}.tgz"
+          asset="cargo-audit-x86_64-unknown-linux-musl-v${ver}.tgz"
           enc=$(printf '%s' "$url" | sed 's|/|%2F|')
-          echo "Fetching prebuilt cargo-audit ${ver}"
+          echo "Fetching prebuilt cargo-audit ${ver} (musl)"
           if curl -sSfL "https://github.com/rustsec/rustsec/releases/download/${enc}/${asset}" \
                | tar -xz -C /tmp; then
-            cp "/tmp/cargo-audit-x86_64-unknown-linux-gnu-v${ver}/cargo-audit" "$CARGO_HOME/bin/"
+            cp "/tmp/cargo-audit-x86_64-unknown-linux-musl-v${ver}/cargo-audit" "$CARGO_HOME/bin/"
             chmod +x "$CARGO_HOME/bin/$want"
+            # Only keep it if it actually runs here; otherwise fall through to
+            # building from source.
+            if ! "$CARGO_HOME/bin/$want" --version >/dev/null 2>&1; then
+              echo "prebuilt cargo-audit cannot run on this image; building from source"
+              rm -f "$CARGO_HOME/bin/$want"
+            fi
           fi
         fi
       fi
