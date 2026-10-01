@@ -34,6 +34,13 @@ instead. Camera RAW is skipped for the same reason.
 
 ## Bug fixes
 
+### Dependency advisory: webbrowser 1.2.1
+
+A transitive dependency of `eframe` (so of the desktop GUI) mishandled the
+Unix `BROWSER` environment variable, allowing argument injection when a URL is
+opened. Bumped to 1.2.4. Caught by the new `cargo audit` step in CI — the
+release could not have shipped without it.
+
 ### Corrupt files from truncated images
 
 A PNG cut off at a chunk boundary was reported as **successfully scrubbed**,
