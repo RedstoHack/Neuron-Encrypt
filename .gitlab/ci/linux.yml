@@ -125,8 +125,11 @@ appimage:
     APPIMAGE_EXTRACT_AND_RUN: "1"
   before_script:
     - apt-get update -qq
+    # ca-certificates is required: the ubuntu:22.04 base image ships without a
+    # CA bundle, and curl then fails with "error setting certificate file
+    # /etc/ssl/certs/ca-certificates.crt" (exit 77) on the first HTTPS request.
     - apt-get install -y -qq --no-install-recommends
-        curl desktop-file-utils file libfuse2
+        ca-certificates curl desktop-file-utils file libfuse2
     # appimagetool + the runtime, fetched directly because Ubuntu 22.04 does
     # not package it. curl -L (not wget -q) because the asset 302-redirects to
     # release-assets.githubusercontent.com and wget aborted on that chain.
