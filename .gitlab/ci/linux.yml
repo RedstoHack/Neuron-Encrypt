@@ -126,13 +126,17 @@ appimage:
   before_script:
     - apt-get update -qq
     - apt-get install -y -qq --no-install-recommends
-        wget desktop-file-utils file libfuse2
+        curl desktop-file-utils file libfuse2
     # appimagetool + the runtime. Fetched directly rather than via apt because
     # Ubuntu 22.04 does not package it.
-    - wget -q
+    # curl -L rather than wget: the asset URL 302-redirects to
+    # release-assets.githubusercontent.com, and wget -q aborted on that chain
+    # (exit 5) even though the URL is valid.
+    - curl --fail --location --retry 3
         "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
-        -O /usr/local/bin/appimagetool
+        -o /usr/local/bin/appimagetool
     - chmod +x /usr/local/bin/appimagetool
+    - appimagetool --version || echo "note: appimagetool --version unsupported; continuing"
   script:
     - VERSION=$(grep '^version' neuron-encrypt/Cargo.toml | head -1 | cut -d'"' -f2)
     - APPDIR="/tmp/neuron-encrypt.AppDir"
@@ -157,18 +161,23 @@ appimage:
       EOF
     - cp "$APPDIR/neuron-encrypt.desktop" "$APPDIR/usr/share/applications/"
 
-    # Icon. Falls back to a generated placeholder so the build never fails on a
-    # missing asset; replace with the real branded icon when available.
+    # Icon. appimagetool resolves the icon named in the .desktop file relative
+    # to the AppDir *root*, not the hicolor theme directory, and aborts with
+    # "neuron-encrypt{.png,...} defined in desktop file but not found"
+    # otherwise. Install it in both places.
     - |
-      ICON="$APPDIR/usr/share/icons/hicolor/256x256/apps/neuron-encrypt.png"
-      mkdir -p "$(dirname "$ICON")"
+      ROOT_ICON="$APPDIR/neuron-encrypt.png"
+      THEME_DIR="$APPDIR/usr/share/icons/hicolor/256x256/apps"
+      mkdir -p "$THEME_DIR"
       if [ -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png ]; then
-        cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png "$ICON"
+        cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png "$ROOT_ICON"
       else
-        echo "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAO0lEQVR42u3OMQEAAAgDoC251a3gLwSgcrfTBgQCgUAgEAgEAoFAIBAIBAKBQCAQCAQCgUAgEAgEAoFAIBAIBAKBQCAQCAQCgUAgEAgEAoFA8G0Kc3AAAAAElFTkSuQmCC" \
-          | base64 -d > "$ICON"
+        # Minimal 1x1 PNG (8-bit RGBA) placeholder so the build never fails on a
+        # missing asset. Replace with the real branded icon when available.
+        printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82' > "$ROOT_ICON"
       fi
-      ls -l "$ICON"
+      cp "$ROOT_ICON" "$THEME_DIR/neuron-encrypt.png"
+      ls -l "$ROOT_ICON"
 
     - |
       # The eframe/egui runtime libraries. Without these the app starts and
