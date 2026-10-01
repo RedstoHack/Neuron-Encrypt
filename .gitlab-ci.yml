@@ -249,34 +249,52 @@ create-release:
 
     - echo "Creating GitLab release $VERSION"
     - |
-      # Build the asset list as JSON: [{name, url, link_type: "package"}].
-      # Package-registry links are stable and never expire, which is what the
-      # installers resolve against.
-      {
-        echo '{"assets":['
-        first=1
-        while IFS='|' read -r name url; do
-          [ -n "$name" ] || continue
-          [ $first -eq 1 ] || echo ','
-          first=0
-          printf '  {"name":"%s","url":"%s","link_type":"package"}' "$name" "$url"
-        done < assets.txt
-        echo ']}'
-      } > assets.json
-      cat assets.json
-      count=$(grep -c '"name"' assets.json || true)
-      echo "attaching $count asset(s)"
-      if [ "$count" -eq 0 ]; then
-        echo "ERROR: no assets found; refusing to create an empty release" >&2
-        exit 1
+      # Create the release first, then attach each link.
+      #
+      # Passing assets inline on the create call does not work on this GitLab
+      # instance: a bare list gives "assets is invalid", an empty list gives
+      # the same, and the {links:[...]} hash is accepted but silently drops
+      # every link. POSTing to /assets/links one object at a time is the form
+      # that actually attaches them, so that is what is used here.
+      NOTES="docs/releases/RELEASE_NOTES_${VERSION}.md"
+      if [ -f "$NOTES" ]; then
+        desc=$(jq -Rs . < "$NOTES")
+      else
+        echo "WARN: $NOTES not found; releasing without a description" >&2
+        desc=$(printf '"Neuron Encrypt %s"' "$VERSION")
       fi
-
-    - |
+      jq -n --arg tag "$CI_COMMIT_TAG" --arg name "Neuron Encrypt $VERSION" \
+            --argjson desc "$desc" \
+        '{tag_name: $tag, name: $name, description: $desc}' > release.json
       curl --fail --request POST \
         --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-        --data @assets.json \
-        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases?version=${VERSION}&name=Neuron%20Encrypt%20${VERSION}" \
-        | jq -r '.tag_name, .released_at, (.assets[] | "  asset: \(.name)")'
+        --header "Content-Type: application/json" \
+        --data @release.json \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases" \
+        | jq -r '"created release " + .tag_name'
+
+    - |
+      attached=0
+      while IFS='|' read -r name url; do
+        [ -n "$name" ] || continue
+        jq -n --arg n "$name" --arg u "$url" '{name: $n, url: $u}' > link.json
+        if curl --fail --silent --request POST \
+             --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+             --header "Content-Type: application/json" \
+             --data @link.json \
+             "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${CI_COMMIT_TAG}/assets/links" \
+             >/dev/null; then
+          echo "  attached $name"
+          attached=$((attached + 1))
+        else
+          echo "  WARN could not attach $name" >&2
+        fi
+      done < assets.txt
+      echo "attached $attached asset link(s)"
+      if [ "$attached" -eq 0 ]; then
+        echo "ERROR: no assets attached; the release would be empty" >&2
+        exit 1
+      fi
 
 # -----------------------------------------------------------------------------
 # 4. Pages — the website, the installers and the version pointer
