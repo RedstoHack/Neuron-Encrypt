@@ -27,13 +27,29 @@ test -f "$ANDROID_NDK_HOME/source.properties" || { echo "FATAL: NDK missing afte
 rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
 
 # ---- cargo-ndk: prebuilt binary (any archive layout), fallback to source ---
+#
+# The prebuilt release binary is linked against glibc 2.39 (built on Ubuntu
+# 24.04) while this image is Debian bookworm with glibc 2.36, so it can be
+# present and executable yet fail with "version `GLIBC_2.39' not found" on
+# first run. Testing that it actually *executes* is the only reliable check;
+# a successful download and a 0755 mode do not imply it will run. Without this
+# the source fallback below was skipped and the job died at the final
+# `cargo ndk --version`.
 mkdir -p "$CARGO_HOME/bin"
-if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ]; then
+if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ] || ! "$CARGO_HOME/bin/cargo-ndk" --version >/dev/null 2>&1; then
+  rm -f "$CARGO_HOME/bin/cargo-ndk"
   tmpd=$(mktemp -d)
   if curl -sSfL https://github.com/bbqsrc/cargo-ndk/releases/download/v4.1.2/cargo-ndk-x86_64-unknown-linux-gnu-v4.1.2.tgz \
        | tar -xz -C "$tmpd"; then
     BIN=$(find "$tmpd" -type f -name cargo-ndk | head -1)
-    [ -n "$BIN" ] && install -m 755 "$BIN" "$CARGO_HOME/bin/cargo-ndk"
+    if [ -n "$BIN" ]; then
+      install -m 755 "$BIN" "$CARGO_HOME/bin/cargo-ndk"
+      # Same problem as above: verify it runs before trusting it.
+      if ! "$CARGO_HOME/bin/cargo-ndk" --version >/dev/null 2>&1; then
+        echo "prebuilt cargo-ndk cannot run on this image (glibc too old); building from source"
+        rm -f "$CARGO_HOME/bin/cargo-ndk"
+      fi
+    fi
   fi
   rm -rf "$tmpd"
   if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ]; then
