@@ -829,6 +829,7 @@ fn cleaned_copy_default_naming_and_original_untouched() {
         None,
         ScrubOutput::CleanedCopy,
         false,
+        false,
         &NullReporter,
         None,
     )
@@ -857,6 +858,7 @@ fn explicit_dest_conflict_respected() {
         Some(&existing_dest),
         ScrubOutput::CleanedCopy,
         false,
+        false,
         &NullReporter,
         None,
     )
@@ -882,6 +884,7 @@ fn unsupported_formats_fail_loudly_without_output() {
             None,
             ScrubOutput::CleanedCopy,
             false,
+            false,
             &NullReporter,
             None,
         )
@@ -906,7 +909,16 @@ fn truncated_files_fail_cleanly() {
 
     let png_trunc = &png_fixture(true)[..14];
     let src = write_file(&dir, "cut.png", png_trunc);
-    let err = scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap_err();
+    let err = scrub_file(
+        &src,
+        None,
+        ScrubOutput::InPlace,
+        false,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap_err();
     assert!(matches!(
         err,
         CryptoError::MalformedFile(_) | CryptoError::UnsupportedMediaFormat(_)
@@ -914,7 +926,16 @@ fn truncated_files_fail_cleanly() {
 
     let jpg_trunc = &jpeg_fixture(true)[..6];
     let src = write_file(&dir, "cut.jpg", jpg_trunc);
-    let err = scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap_err();
+    let err = scrub_file(
+        &src,
+        None,
+        ScrubOutput::InPlace,
+        false,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap_err();
     assert!(matches!(
         err,
         CryptoError::MalformedFile(_) | CryptoError::UnsupportedMediaFormat(_)
@@ -941,6 +962,7 @@ fn cancel_flag_prevents_work_and_output() {
         None,
         ScrubOutput::CleanedCopy,
         false,
+        false,
         &NullReporter,
         Some(&flag),
     )
@@ -961,7 +983,16 @@ fn in_place_replaces_source_atomically() {
     let src = write_file(&dir, "pic.jpg", &jpeg_fixture(true));
     let original = std::fs::read(&src).unwrap();
 
-    let report = scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+    let report = scrub_file(
+        &src,
+        None,
+        ScrubOutput::InPlace,
+        false,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap();
     assert_eq!(report.format, MediaFormat::Jpeg);
 
     let out = std::fs::read(&src).unwrap();
@@ -977,7 +1008,16 @@ fn in_place_leaves_no_scratch_files_behind() {
     let dir = tmp_dir("inplace-scratch");
     let src = write_file(&dir, "pic.jpg", &jpeg_fixture(true));
 
-    scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+    scrub_file(
+        &src,
+        None,
+        ScrubOutput::InPlace,
+        false,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap();
 
     // Only the scrubbed source may remain; a stranded `*.tmp` here would mean
     // the two-step replace ran (and could have lost the original on failure).
@@ -1000,7 +1040,16 @@ fn in_place_preserves_permission_bits() {
     let src = write_file(&dir, "shared.jpg", &jpeg_fixture(true));
     std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-    scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+    scrub_file(
+        &src,
+        None,
+        ScrubOutput::InPlace,
+        false,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap();
 
     let mode = std::fs::metadata(&src).unwrap().permissions().mode() & 0o777;
     assert_eq!(
@@ -1020,7 +1069,16 @@ fn in_place_preserves_read_only_attribute() {
     perms.set_readonly(true);
     std::fs::set_permissions(&src, perms).unwrap();
 
-    let report = scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+    let report = scrub_file(
+        &src,
+        None,
+        ScrubOutput::InPlace,
+        false,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap();
     assert_eq!(report.format, MediaFormat::Jpeg);
 
     assert!(
@@ -1050,6 +1108,7 @@ fn in_place_through_symlink_updates_target_and_keeps_link() {
         &link,
         None,
         ScrubOutput::InPlace,
+        false,
         false,
         &NullReporter,
         None,
@@ -1082,7 +1141,28 @@ fn in_place_failure_keeps_original_intact() {
     // touch the source, so the failure path must leave the file untouched.
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
-    let err = scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap_err();
+    // root bypasses directory permission bits (CAP_DAC_OVERRIDE), so the write
+    // would succeed and there would be no failure path to assert on. Skip in
+    // that case rather than fail: the invariant only holds for an unprivileged
+    // user, and CI images commonly run as root.
+    if std::fs::File::create(dir.join(".probe")).is_ok() {
+        eprintln!("skipping: directory mode 0500 is not enforced for this user");
+        std::fs::remove_file(dir.join(".probe")).ok();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    }
+
+    let err = scrub_file(
+        &src,
+        None,
+        ScrubOutput::InPlace,
+        false,
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap_err();
     assert!(
         matches!(err, CryptoError::Io(_)),
         "unexpected error: {err:?}"
@@ -1107,6 +1187,7 @@ fn wipe_original_removes_source_in_copy_mode() {
         &src,
         None,
         ScrubOutput::CleanedCopy,
+        false,
         true,
         &NullReporter,
         None,
@@ -1129,11 +1210,28 @@ fn idempotence_across_formats() {
     ] {
         let dir = tmp_dir(&format!("idem-{name}"));
         let src = write_file(&dir, name, &data);
-        scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+        scrub_file(
+            &src,
+            None,
+            ScrubOutput::InPlace,
+            false,
+            false,
+            &NullReporter,
+            None,
+        )
+        .unwrap();
         let once = std::fs::read(&src).unwrap();
 
-        let report =
-            scrub_file(&src, None, ScrubOutput::InPlace, false, &NullReporter, None).unwrap();
+        let report = scrub_file(
+            &src,
+            None,
+            ScrubOutput::InPlace,
+            false,
+            false,
+            &NullReporter,
+            None,
+        )
+        .unwrap();
         assert_eq!(report.format, format);
         assert!(
             report.removed.is_empty(),
@@ -1158,11 +1256,117 @@ fn missing_source_errors() {
         None,
         ScrubOutput::CleanedCopy,
         false,
+        false,
         &NullReporter,
         None,
     )
     .unwrap_err();
     assert!(matches!(err, CryptoError::NotAFile(_)));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ===========================================================================
+// Overwrite semantics (the `--force` / `-F` path)
+// ===========================================================================
+
+/// A scrub that fails part-way through must never destroy a pre-existing
+/// destination. The CLI used to satisfy `--force` by deleting the target up
+/// front, which lost the file on any later failure; replacement is atomic and
+/// happens only after the cleaned copy is complete.
+#[test]
+fn failed_overwrite_preserves_existing_destination() {
+    let dir = tmp_dir("overwrite-fail");
+    // Unsupported format: detection fails after the destination is chosen.
+    let src = write_file(&dir, "notes.txt", b"plain text, not a media file");
+    let dest = write_file(&dir, "precious.jpg", b"irreplaceable original data");
+
+    let err = scrub_file(
+        &src,
+        Some(&dest),
+        ScrubOutput::CleanedCopy,
+        true, // overwrite = true
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, CryptoError::UnsupportedMediaFormat(_)));
+    assert_eq!(
+        std::fs::read(&dest).unwrap(),
+        b"irreplaceable original data",
+        "existing destination was destroyed by a failed overwrite"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Cancelling a forced overwrite leaves the destination untouched.
+#[test]
+fn cancelled_overwrite_preserves_existing_destination() {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let dir = tmp_dir("overwrite-cancel");
+    let src = write_file(&dir, "photo.jpg", &jpeg_fixture(true));
+    let dest = write_file(&dir, "out.jpg", b"previous cleaned copy");
+
+    // Pre-cancelled: the run aborts before any output is persisted.
+    let cancel = Arc::new(AtomicBool::new(true));
+    let err = scrub_file(
+        &src,
+        Some(&dest),
+        ScrubOutput::CleanedCopy,
+        true, // overwrite = true
+        false,
+        &NullReporter,
+        Some(&cancel),
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, CryptoError::Cancelled));
+    assert_eq!(
+        std::fs::read(&dest).unwrap(),
+        b"previous cleaned copy",
+        "cancelled overwrite destroyed the existing destination"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// `overwrite = true` against an existing destination replaces it atomically
+/// with the scrubbed output.
+#[test]
+fn forced_overwrite_replaces_existing_destination() {
+    let dir = tmp_dir("overwrite-ok");
+    let src = write_file(&dir, "photo.jpg", &jpeg_fixture(true));
+    let original = std::fs::read(&src).unwrap();
+    let dest = write_file(&dir, "out.jpg", b"stale bytes");
+
+    let report = scrub_file(
+        &src,
+        Some(&dest),
+        ScrubOutput::CleanedCopy,
+        true, // overwrite = true
+        false,
+        &NullReporter,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(report.format, MediaFormat::Jpeg);
+    let written = std::fs::read(&dest).unwrap();
+    assert!(
+        find(&written, EVIL_CAMERA).is_none(),
+        "metadata survived the forced overwrite"
+    );
+    assert_ne!(written, b"stale bytes", "destination was not replaced");
+    assert_eq!(
+        std::fs::read(&src).unwrap(),
+        original,
+        "source must be untouched by a cleaned-copy scrub"
+    );
+
     std::fs::remove_dir_all(&dir).ok();
 }
 

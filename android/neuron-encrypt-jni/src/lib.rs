@@ -806,6 +806,7 @@ fn native_scrub_impl(
             Some(&staged_out),
             neuron_encrypt_core::metadata::ScrubOutput::CleanedCopy,
             false,
+            false,
             &phase2,
             Some(bridge.flag()),
         )

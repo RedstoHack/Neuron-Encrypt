@@ -351,11 +351,18 @@ fn persist_scratched(tmp: &Path, dest: &Path) -> CryptoResult<()> {
 ///   (best-effort on flash storage).
 /// - [`ScrubOutput::InPlace`] atomically replaces the source file.
 ///
+/// `overwrite` only affects [`ScrubOutput::CleanedCopy`]: when false an
+/// existing `dest` is rejected with [`CryptoError::FileAlreadyExists`], when
+/// true it is replaced atomically by [`persist_scratched`]. The existing file
+/// is never deleted up front, so a failure part-way through leaves it intact.
+///
 /// Unknown/corrupt inputs fail loudly and leave no output behind.
+#[allow(clippy::too_many_arguments)]
 pub fn scrub_file(
     src: &Path,
     dest: Option<&Path>,
     mode: ScrubOutput,
+    overwrite: bool,
     wipe_original: bool,
     reporter: &dyn ProgressReporter,
     cancel_flag: Option<&Arc<AtomicBool>>,
@@ -382,7 +389,7 @@ pub fn scrub_file(
             let explicit = dest.map(Path::to_path_buf);
             let candidate =
                 explicit.unwrap_or_else(|| src.with_file_name(default_scrub_output_name(src)));
-            crate::crypto::validate_destination_path_public(src, &candidate, false)?
+            crate::crypto::validate_destination_path_public(src, &candidate, overwrite)?
         }
         ScrubOutput::InPlace => {
             // Resolve symlinks so an in-place scrub rewrites the *target* file

@@ -686,6 +686,7 @@ impl NeuronEncryptApp {
                 Some(&dest),
                 metadata::ScrubOutput::CleanedCopy,
                 false,
+                false,
                 &throttled_reporter,
                 Some(&cancel_for_thread),
             );
@@ -794,6 +795,7 @@ impl NeuronEncryptApp {
                     src,
                     Some(&dest),
                     metadata::ScrubOutput::CleanedCopy,
+                    false,
                     false,
                     &throttled,
                     Some(&cancel),

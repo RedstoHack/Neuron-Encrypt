@@ -439,12 +439,14 @@ fn validate_output_path(
         return Err((ExitCode::BadInput, msg));
     }
 
-    fs::remove_file(output_path).map_err(|e| {
-        (
-            ExitCode::RuntimeError,
-            format!("Cannot remove existing output file: {e}"),
-        )
-    })
+    // Deliberately do NOT delete the existing output here. The destination is
+    // replaced atomically by `crypto::persist_temp_file` (rename over the
+    // target) once the new content is fully written and fsync'd. Removing it
+    // up front re-opens the exact data-loss window the core was hardened
+    // against: any failure between here and the final rename (full disk,
+    // wrong passphrase, Ctrl-C, power loss) would leave the user with neither
+    // the old file nor the new one.
+    Ok(())
 }
 
 fn emit_json(result: &JsonResult) {
@@ -838,13 +840,8 @@ fn run_stream(
                     return Err(ExitCode::BadInput);
                 }
             };
-            let stream_res = crypto::decrypt_stream(
-                &mut reader,
-                &mut out,
-                password,
-                source_size,
-                &throttled,
-            );
+            let stream_res =
+                crypto::decrypt_stream(&mut reader, &mut out, password, source_size, &throttled);
             match stream_res {
                 Ok(()) => {
                     if let Err(e) = out.sync_all() {
@@ -943,19 +940,11 @@ fn run_scrub(
         metadata::ScrubOutput::CleanedCopy
     };
 
-    // Explicit destination handling: default naming comes from the core;
-    // --force deletes an existing explicit target up front (mirrors encrypt).
+    // Explicit destination handling. An existing target is NOT removed here:
+    // `scrub_file` rejects it unless --force, and then replaces it atomically
+    // once the cleaned copy is fully written. Deleting up front would lose the
+    // user's file if the scrub failed part-way through.
     let dest: Option<PathBuf> = output_str.as_ref().map(PathBuf::from);
-    if let Some(dest) = &dest {
-        if dest.exists() && cli.force {
-            if let Err(e) = fs::remove_file(dest) {
-                let msg = format!("Cannot remove existing output file: {e}");
-                emit_error_json(cli.json, &start, None, &msg);
-                eprintln!("Error: {msg}");
-                return Err(ExitCode::RuntimeError);
-            }
-        }
-    }
 
     let source_size = fs::metadata(&input_path).ok().map(|m| m.len());
     let show_progress = !cli.no_progress && !cli.quiet && !cli.json;
@@ -965,6 +954,7 @@ fn run_scrub(
         &input_path,
         dest.as_deref(),
         mode,
+        cli.force,
         wipe_original,
         reporter.as_ref(),
         Some(&interrupt_flag()),
