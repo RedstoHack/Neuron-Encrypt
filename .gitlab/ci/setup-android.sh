@@ -35,8 +35,23 @@ rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-and
 # a successful download and a 0755 mode do not imply it will run. Without this
 # the source fallback below was skipped and the job died at the final
 # `cargo ndk --version`.
+#
+# Two failure modes are handled here, both seen on 2026-10-01:
+#
+#  1. The prebuilt v4.1.2 binary is linked against glibc 2.39 (Ubuntu 24.04)
+#     while this image is Debian bookworm (glibc 2.36), so it downloads and
+#     installs with mode 0755 but dies on first run. Testing that it actually
+#     *executes* is the only reliable check; a successful download says nothing.
+#
+#  2. When that check rejects the prebuilt, the binary is removed and rebuilt
+#     from source. `cargo install` then refuses with "Ignored package
+#     `cargo-ndk v4.1.2` is already installed" because a previous run recorded
+#     it in $CARGO_HOME, which is cached between jobs. Hence `cargo uninstall`
+#     first, and `--force` as a belt-and-braces fallback.
 mkdir -p "$CARGO_HOME/bin"
-if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ] || ! "$CARGO_HOME/bin/cargo-ndk" --version >/dev/null 2>&1; then
+cargo_ndk_works() { [ -x "$CARGO_HOME/bin/cargo-ndk" ] && "$CARGO_HOME/bin/cargo-ndk" --version >/dev/null 2>&1; }
+
+if ! cargo_ndk_works; then
   rm -f "$CARGO_HOME/bin/cargo-ndk"
   tmpd=$(mktemp -d)
   if curl -sSfL https://github.com/bbqsrc/cargo-ndk/releases/download/v4.1.2/cargo-ndk-x86_64-unknown-linux-gnu-v4.1.2.tgz \
@@ -45,16 +60,19 @@ if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ] || ! "$CARGO_HOME/bin/cargo-ndk" --versi
     if [ -n "$BIN" ]; then
       install -m 755 "$BIN" "$CARGO_HOME/bin/cargo-ndk"
       # Same problem as above: verify it runs before trusting it.
-      if ! "$CARGO_HOME/bin/cargo-ndk" --version >/dev/null 2>&1; then
+      if ! cargo_ndk_works; then
         echo "prebuilt cargo-ndk cannot run on this image (glibc too old); building from source"
         rm -f "$CARGO_HOME/bin/cargo-ndk"
       fi
     fi
   fi
   rm -rf "$tmpd"
-  if [ ! -x "$CARGO_HOME/bin/cargo-ndk" ]; then
+
+  if ! cargo_ndk_works; then
     echo "prebuilt unavailable; compiling cargo-ndk from source"
-    cargo install cargo-ndk --locked --version 4.1.2
+    # Clear the cached install record so cargo does not treat it as present.
+    cargo uninstall cargo-ndk >/dev/null 2>&1 || true
+    cargo install cargo-ndk --locked --version 4.1.2 --force
   fi
 fi
 export PATH="$CARGO_HOME/bin:$PATH"

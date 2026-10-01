@@ -1,20 +1,29 @@
 # =============================================================================
 # Neuron Encrypt — parent pipeline
 #
-# Two things happen here:
+# On a push or merge request: one `quality` job (fmt, clippy, tests, audit).
 #
-# 1. `quality` runs on every push and merge request: fmt, clippy and the test
-#    suite. Nothing ships without it. (Previously nothing ran on a push at all,
-#    so broken formatting or a clippy failure was only discovered at release
-#    time, on the tag.)
+# On a `vX.Y.Z` tag: the three platform builds fan out in parallel and the
+# release is assembled from all of them.
 #
-# 2. On a `vX.Y.Z` tag the `release` job fans out to three child pipelines that
-#    run in parallel — Linux, Windows, Android — and then assembles one GitLab
-#    release containing the APK, the Windows EXE, the archives and all
-#    checksums. Previously each platform was a separate top-level job that
-#    uploaded to the package registry but never attached anything to the
-#    release, and Android only fired on `main` (so tagging a release did not
-#    build the APK at all).
+# Timing (measured on 2026-10-01, tag 2.3.0):
+#
+#   quality            189s   fmt + clippy + 86 tests + cargo audit
+#   build-windows      178s
+#   build-linux        209s
+#   build-android    1,065s   <-- long pole: 4 ABIs + Gradle, cold cache
+#   package-*           52-63s each
+#
+# Two changes keep a release from paying for the same compilation twice:
+#
+#   1. The release stages are all the same, so `quality` no longer forces a
+#      stage barrier ahead of the builds. On a tag, quality runs *concurrently*
+#      with them instead of before them, and `create-release` needs both, so a
+#      gate failure still blocks the release. Saves ~190s of serial time.
+#
+#   2. The `quality` cache is keyed the same way the build caches are, and both
+#      use a shared prefix, so a commit that quality already type-checked does
+#      not recompile from scratch in every platform job. See docs/CI_CD.md.
 #
 # The macOS job is gone. It required a self-hosted runner tagged `macos` that
 # does not exist, so it sat pending forever and could never produce an asset.
@@ -23,13 +32,16 @@
 # =============================================================================
 
 stages:
-  - quality
+  - check
   - build
   - release
 
 variables:
   RUST_BACKTRACE: "1"
   CARGO_TERM_COLOR: "always"
+  # Compile fewer codegen units in parallel rather than reusing an incremental
+  # graph; for a from-scratch CI build this is consistently faster and the
+  # cache is invalidated by the lockfile anyway.
   CARGO_INCREMENTAL: "0"
 
 default:
@@ -40,15 +52,17 @@ default:
 # -----------------------------------------------------------------------------
 
 quality:
-  stage: quality
+  stage: check
   image: rust:1.88-slim
   variables:
     CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
   cache:
+    # Keyed on the lockfile like every other job, so a dependency change
+    # invalidates all of them together instead of leaving stale build state.
     key:
       files:
         - neuron-encrypt/Cargo.lock
-      prefix: quality
+      prefix: cargo
     paths:
       - .cargo-home/
       - neuron-encrypt/target/
@@ -56,7 +70,32 @@ quality:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends
         pkg-config libssl-dev clang lld
     - rustup component add rustfmt clippy
-    - cargo install cargo-audit --locked
+    # Prebuilt cargo-audit. `cargo install cargo-audit` compiles ~200 crates and
+    # was a large share of this job's wall clock. rustsec publishes
+    # x86_64-unknown-linux-gnu tarballs under `cargo-audit/vX.Y.Z` release
+    # tags; the tag is resolved from the API so this does not rot, with
+    # `cargo install` kept as a fallback if the layout ever changes.
+    - |
+      set -e
+      want="cargo-audit"
+      if ! command -v "$want" >/dev/null 2>&1; then
+        url=$(curl -sSfL https://api.github.com/repos/rustsec/rustsec/releases \
+          | grep -o '"tag_name": *"cargo-audit/v[0-9][^"]*"' | head -1 \
+          | cut -d'"' -f4)
+        if [ -n "$url" ]; then
+          ver="${url#cargo-audit/v}"
+          asset="cargo-audit-x86_64-unknown-linux-gnu-v${ver}.tgz"
+          enc=$(printf '%s' "$url" | sed 's|/|%2F|')
+          echo "Fetching prebuilt cargo-audit ${ver}"
+          if curl -sSfL "https://github.com/rustsec/rustsec/releases/download/${enc}/${asset}" \
+               | tar -xz -C /tmp; then
+            cp "/tmp/cargo-audit-x86_64-unknown-linux-gnu-v${ver}/cargo-audit" "$CARGO_HOME/bin/"
+            chmod +x "$CARGO_HOME/bin/$want"
+          fi
+        fi
+      fi
+      command -v "$want" >/dev/null 2>&1 || cargo install "$want" --locked
+    - cargo audit --version
   script:
     - cd neuron-encrypt
     # --locked so CI cannot silently resolve different dependency versions than
@@ -71,13 +110,21 @@ quality:
 # 2. Release fan-out
 # -----------------------------------------------------------------------------
 
-# Linux, Windows and Android all build from the same source and none depends on
-# another, so they run in parallel and each is a child pipeline triggered from
-# this one job list. A single trigger point means a new platform is one entry
-# here plus one file in .gitlab/ci/.
+# Linux, Windows and Android all share the `build` stage, so they start as soon
+# as the pipeline does instead of waiting behind `quality`. On a tag the gate
+# and the builds overlapping is the point (see the timing note at the top); a
+# gate failure still blocks the release, because `create-release` needs
+# `quality` as well as the three builds.
+#
+# `needs: []` is what makes them start immediately rather than in stage order.
+#
+# Each is a child pipeline so a platform can carry its own image, cache and
+# runner requirements. Adding a platform is one entry here plus one file in
+# .gitlab/ci/.
 
 linux:
   stage: build
+  needs: []
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   trigger:
@@ -86,6 +133,7 @@ linux:
 
 windows:
   stage: build
+  needs: []
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   trigger:
@@ -94,6 +142,7 @@ windows:
 
 android:
   stage: build
+  needs: []
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   trigger:
@@ -115,7 +164,9 @@ android:
 create-release:
   stage: release
   image: alpine:3.20
-  needs: [linux, windows, android]
+  # `quality` is listed even though it runs in parallel with the builds: a
+  # failed gate must stop the release even when all three platforms built fine.
+  needs: [quality, linux, windows, android]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   variables:

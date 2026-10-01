@@ -22,12 +22,27 @@ variables:
   CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
 
 cache:
-  key: android-v2
-  paths:
-    - .ci-android/sdk/
-    - .cargo-home/
-    - .gradle-home/
-    - android/.gradle/
+  # The SDK/NDK and cargo-ndk are stable tooling, so they keep a static key and
+  # the ~2 GB NDK is installed once rather than per run.
+  #
+  # The compiled JNI objects are cached separately, keyed on the lockfile, so
+  # they do not live in a multi-gigabyte archive that is re-uploaded whenever
+  # the tooling changes. They were previously not cached at all, which meant
+  # every run recompiled all four ABIs from scratch (1,065 s on 2026-10-01);
+  # a rebuild that only changes Kotlin or Gradle now reuses them.
+  - key: android-toolchain-v3
+    paths:
+      - .ci-android/sdk/
+      - .cargo-home/
+      - .gradle-home/
+      - android/.gradle/
+  - key:
+      files:
+        - android/neuron-encrypt-jni/Cargo.lock
+        - neuron-encrypt/Cargo.lock
+      prefix: android-jni
+    paths:
+      - android/neuron-encrypt-jni/target/
 
 build-android-apk:
   stage: build
