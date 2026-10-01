@@ -72,6 +72,10 @@ private val NOT_SUPPORTED = listOf(
     )
 )
 
+// TopAppBar / TopAppBarDefaults are still marked ExperimentalMaterial3Api.
+// Opt in on this composable only, rather than project-wide, so the rest of the
+// app keeps whatever posture it already had.
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FormatsScreen(onBack: () -> Unit) {
     Scaffold(

@@ -13,6 +13,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.neuronencrypt.app.ui.BatchScreen
+import com.neuronencrypt.app.ui.FormatsScreen
 import com.neuronencrypt.app.ui.HomeScreen
 import com.neuronencrypt.app.ui.SingleFileScreen
 import com.neuronencrypt.app.ui.theme.NeuronEncryptTheme
