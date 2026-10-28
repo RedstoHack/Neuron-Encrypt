@@ -1,4 +1,17 @@
 [toolchain]
-channel = "stable"
+# Pinned, not "stable".
+#
+# Rust's toolchain-file discovery walks up from the crate directory, so this
+# file governs local builds *and* the builds that run inside the CI images.
+# With `channel = "stable"` the CI image `rust:1.88-slim` resolved "stable" to
+# whatever the current release channel happened to be, not to 1.88 — so the
+# "1.88" pipelines were not necessarily building with 1.88. The repo had three
+# different policies at once (this file, `dtolnay/rust-toolchain@stable` with
+# `toolchain: stable` in the Android workflows, and `toolchain: 1.88.0` in the
+# desktop workflow). One pinned version everywhere removes the drift.
+#
+# 1.89, not 1.88: lofty 0.25.1 in the committed lockfile requires rustc 1.89,
+# so a 1.88 pin cannot resolve Cargo.lock at all.
+channel = "1.89.0"
 targets = ["aarch64-linux-android", "armv7-linux-androideabi",
            "x86_64-linux-android", "i686-linux-android"]
