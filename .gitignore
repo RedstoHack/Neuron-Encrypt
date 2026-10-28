@@ -15,3 +15,18 @@ gradle-home/
 local-maven-repo/
 offline-gmaven-stable.zip
 .tooling/
+
+# Release artifacts are published through the GitLab package registry and the
+# release page — never committed to the repository. Prebuilt binaries sitting
+# in version control cannot be traced back to a CI run or a signed tag.
+/release/
+
+# Stale `cargo audit` snapshots rot silently; they are regenerated per run.
+/audit_output.json
+
+# TLS interception CAs must never be committed: a machine that trusts one can
+# be made to accept forged certificates for every HTTPS endpoint.
+*.pem
+*.crt
+!android/app/src/main/res/**/*.xml
+
