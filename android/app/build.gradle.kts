@@ -3,6 +3,24 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Release signing for the `standard` flavor.
+//
+// These come from CI environment variables. When they are not all present the
+// flavor is built *unsigned* and the build says so loudly. Previously the
+// project had no `signingConfigs` block at all, so the CI produced an
+// unsigned `standardRelease` APK while the release metadata advertised a
+// signed one that could never exist.
+val releaseStorePath = System.getenv("UPLOAD_KEYSTORE_PATH")
+val releaseStorePassword = System.getenv("UPLOAD_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("UPLOAD_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("UPLOAD_KEY_PASSWORD")
+val releaseSigningAvailable = listOf(
+    releaseStorePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrEmpty() }
+
 android {
     namespace = "com.neuronencrypt.app"
     compileSdk = 34
@@ -19,14 +37,37 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseSigningAvailable) {
+            create("release") {
+                storeFile = file(releaseStorePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     flavorDimensions += "store"
     productFlavors {
         create("fdroid") {
             dimension = "store"
+            // F-Droid re-signs the build with its own key, so this flavor
+            // must be left unsigned.
             signingConfig = null
         }
         create("standard") {
             dimension = "store"
+            signingConfig = if (releaseSigningAvailable) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn(
+                    "neuron-encrypt: release signing environment is incomplete " +
+                        "(UPLOAD_KEYSTORE_PATH / UPLOAD_KEYSTORE_PASSWORD / UPLOAD_KEY_ALIAS / " +
+                        "UPLOAD_KEY_PASSWORD) — the standardRelease APK will be UNSIGNED."
+                )
+                null
+            }
         }
     }
 

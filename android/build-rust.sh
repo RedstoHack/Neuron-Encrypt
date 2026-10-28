@@ -25,4 +25,4 @@ cargo ndk \
   -t x86_64 \
   -t x86 \
   -o "$SCRIPT_DIR/app/src/main/jniLibs" \
-  build --release
+  build --release --locked

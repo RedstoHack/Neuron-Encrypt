@@ -78,15 +78,34 @@ function Get-InstallDir {
 
 # ── ensure on PATH ─────────────────────────────────────────────────────────────
 function Add-ToUserPath([string]$Dir) {
-    $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
-    $entries  = $userPath -split ";"
-    if ($entries -notcontains $Dir) {
-        $newPath = ($entries + $Dir) -join ";"
-        [System.Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
-        # Also update the current-session PATH so the binary is immediately usable
-        $env:PATH = "$env:PATH;$Dir"
-        Write-Step "Added to User PATH: $Dir"
-        Write-Warn "Restart your terminal (or run 'refreshenv') for PATH changes to take full effect."
+    # Read the *unexpanded* registry value and write it back as REG_EXPAND_SZ.
+    #
+    # `SetEnvironmentVariable("PATH", ..., "User")` writes REG_SZ, which turns
+    # every %VAR% in the user's PATH into a literal string, and an empty user
+    # PATH produced a leading ";" — on Windows an empty PATH entry means
+    # "current directory", so the user's own folder would end up on PATH.
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
+    if ($null -eq $key) {
+        Write-Warn "Could not open HKCU\Environment to update PATH — add '$Dir' to your PATH manually."
+        return
+    }
+    try {
+        $raw = $key.GetValue("PATH", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $entries = @()
+        if ($raw) {
+            # Split, drop empty segments, and de-duplicate while keeping order.
+            $entries = @($raw -split ";" | Where-Object { $_ -ne "" } | Select-Object -Unique)
+        }
+        if ($entries -notcontains $Dir) {
+            $newPath = (@($entries) + $Dir) -join ";"
+            $key.SetValue("PATH", $newPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+            # Also update the current-session PATH so the binary is immediately usable
+            $env:PATH = "$env:PATH;$Dir"
+            Write-Step "Added to User PATH: $Dir"
+            Write-Warn "Restart your terminal (or run 'refreshenv') for PATH changes to take full effect."
+        }
+    } finally {
+        $key.Close()
     }
 }
 

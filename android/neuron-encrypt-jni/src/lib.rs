@@ -992,12 +992,21 @@ fn report_to_java(
         jni::objects::JValue::Long(report.bytes_before as jlong),
         jni::objects::JValue::Long(report.bytes_after as jlong),
     ];
-    let _ = env.call_method(
-        listener,
-        "onScrubReport",
-        "(Ljava/lang/String;Ljava/lang/String;JJ)V",
-        &args,
-    );
+    // A failure to deliver the *report* must not fail the operation itself —
+    // the scrubbed file has already been written by this point. But the JNI
+    // exception must still be cleared, otherwise it stays pending and
+    // surfaces later as an unrelated error on this thread.
+    if env
+        .call_method(
+            listener,
+            "onScrubReport",
+            "(Ljava/lang/String;Ljava/lang/String;JJ)V",
+            &args,
+        )
+        .is_err()
+    {
+        let _ = env.exception_clear();
+    }
 }
 
 /// JNI entry point for `NeuronEncryptNative.nativeScrubFormatName`.

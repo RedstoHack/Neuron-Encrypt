@@ -56,6 +56,20 @@ build-android-apk:
     - ./android/build-rust.sh
     - export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
     - export PATH="$JAVA_HOME/bin:$PATH"
+    - |
+      # Materialise the release keystore when the base64 secret is available.
+      # `UPLOAD_KEYSTORE_PATH` must point at a real file for Gradle's
+      # `storeFile`; the secrets themselves stay in protected CI variables.
+      if [ -n "${UPLOAD_KEYSTORE_BASE64:-}" ]; then
+        printf '%s' "$UPLOAD_KEYSTORE_BASE64" | base64 -d > upload-keystore.jks
+        export UPLOAD_KEYSTORE_PATH="$CI_PROJECT_DIR/upload-keystore.jks"
+        echo "Release keystore materialised."
+      elif [ -n "${UPLOAD_KEYSTORE_PATH:-}" ] && [ -f "$UPLOAD_KEYSTORE_PATH" ]; then
+        echo "Using UPLOAD_KEYSTORE_PATH supplied by CI."
+      else
+        echo "WARN: no release keystore available — the standardRelease APK will be UNSIGNED."
+        unset UPLOAD_KEYSTORE_PATH
+      fi
     - cd android
     # Two artifacts, two audiences:
     #  - fdroidRelease: unsigned, for F-Droid (which signs with its own key).
@@ -66,6 +80,7 @@ build-android-apk:
     - ./gradlew :app:assembleFdroidRelease --no-daemon
     - echo "Assembling release APK (standard flavor — signed)..."
     - ./gradlew :app:assembleStandardRelease --no-daemon
+    - ls -la app/build/outputs/apk/standard/release/ || true
   artifacts:
     paths:
       - android/app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk

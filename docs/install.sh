@@ -48,6 +48,12 @@ detect_target() {
         ARCH_SLUG="x86_64"
     fi
 
+    # Only x86_64 Linux binaries are published. Say so plainly instead of
+    # letting the download fail with an opaque 404.
+    if [ "$OS_SLUG" = "linux" ] && [ "$ARCH_SLUG" = "aarch64" ]; then
+        die "No Linux aarch64 (ARM64) build is published yet. Use the x86_64 build under emulation, or build from source: https://gitlab.com/theredhacker0345/neuron-encrypt"
+    fi
+
     TARGET="${BINARY_NAME}-latest-${OS_SLUG}-${ARCH_SLUG}"
 }
 
@@ -91,18 +97,36 @@ download() {
 verify_sha256() {
     BINARY="$1"
     CHECKSUMS="$2"
+    NAME="$(basename "$BINARY")"
     say "Verifying SHA-256…"
-    if command -v sha256sum > /dev/null 2>&1; then
-        # sha256sum checks all entries in the file; grep for our binary name only
-        grep "$(basename "$BINARY")" "$CHECKSUMS" | sha256sum --check --status \
-            || die "SHA-256 verification FAILED. The download may be corrupt or tampered with."
-    elif command -v shasum > /dev/null 2>&1; then
-        grep "$(basename "$BINARY")" "$CHECKSUMS" | shasum -a 256 --check --status \
-            || die "SHA-256 verification FAILED."
-    else
-        warn "No sha256sum or shasum found — skipping integrity check (NOT recommended)."
+
+    # Pull out the checksum line for this exact file. A missing entry must be
+    # a hard failure: `sha256sum --check` exits 0 when it has nothing to
+    # check, so piping an empty selection through it would report success for
+    # a binary that was never verified at all.
+    LINE="$(grep -F "$NAME" "$CHECKSUMS" || true)"
+    if [ -z "$LINE" ]; then
+        die "No checksum entry for $NAME in $(basename "$CHECKSUMS") — refusing to install an unverified binary."
     fi
-    say "Checksum OK."
+    EXPECTED="$(printf '%s\n' "$LINE" | awk '{print $1}')"
+
+    # Compare the digests directly instead of piping into `sha256sum --check`:
+    # that tool resolves the file name in the checksum line against the
+    # *current* directory, while the download lives in a temporary directory.
+    if command -v sha256sum > /dev/null 2>&1; then
+        ACTUAL="$(sha256sum "$BINARY" | awk '{print $1}')"
+    elif command -v shasum > /dev/null 2>&1; then
+        ACTUAL="$(shasum -a 256 "$BINARY" | awk '{print $1}')"
+    else
+        warn "No sha256sum or shasum found — integrity check SKIPPED."
+        warn "The downloaded binary was NOT verified. Verify it manually before trusting it."
+        return 0
+    fi
+
+    if [ -z "$ACTUAL" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
+        die "SHA-256 verification FAILED for $NAME (expected $EXPECTED, got ${ACTUAL:-none}). The download may be corrupt or tampered with."
+    fi
+    say "Checksum verified."
 }
 
 # ── install dir ────────────────────────────────────────────────────────────────

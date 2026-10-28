@@ -119,6 +119,40 @@ quality:
         cargo install "$want" --locked --force
       }
     - cargo audit --version
+    - |
+      set -e
+      want="cargo-deny"
+      mkdir -p "$CARGO_HOME/bin"
+      if ! command -v "$want" >/dev/null 2>&1; then
+        ver="$(curl -sSfL https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/latest \
+          | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+        if [ -n "$ver" ]; then
+          asset="cargo-deny-${ver}-x86_64-unknown-linux-musl.tar.gz"
+          url="https://github.com/EmbarkStudios/cargo-deny/releases/download/${ver}/${asset}"
+          if curl -sSfL -o /tmp/cargo-deny.tar.gz "$url" \
+            && curl -sSfL -o /tmp/cargo-deny.tar.gz.sha256 "${url}.sha256"; then
+            # The release publishes a .sha256 next to every asset — verify it
+            # before unpacking. An unverified "download and run" is how a
+            # compromised registry turns into a compromised build.
+            if (cd /tmp && sha256sum -c cargo-deny.tar.gz.sha256 >/dev/null 2>&1); then
+              tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
+              cp /tmp/cargo-deny-${ver}-x86_64-unknown-linux-musl/cargo-deny "$CARGO_HOME/bin/"
+              chmod +x "$CARGO_HOME/bin/$want"
+              if ! "$CARGO_HOME/bin/$want" --version >/dev/null 2>&1; then
+                echo "prebuilt cargo-deny cannot run on this image; building from source"
+                rm -f "$CARGO_HOME/bin/$want"
+              fi
+            else
+              echo "cargo-deny checksum mismatch — not installing it"
+            fi
+          fi
+        fi
+      fi
+      command -v "$want" >/dev/null 2>&1 || {
+        cargo uninstall "$want" >/dev/null 2>&1 || true
+        cargo install "$want" --locked --force
+      }
+    - cargo deny --version
   script:
     - cd neuron-encrypt
     # --locked so CI cannot silently resolve different dependency versions than
@@ -127,7 +161,15 @@ quality:
     - cargo clippy --locked --all-targets --all-features -- -D warnings
     - cargo test --locked --lib --release
     - cd ..
+    # Audit *both* lockfiles. The Android pipeline publishes the JNI crate, and
+    # its dependency graph is separate from the core crate's — auditing only
+    # the core left the shipped APK's dependencies unchecked.
     - cargo audit --file neuron-encrypt/Cargo.lock
+    - cargo audit --file android/neuron-encrypt-jni/Cargo.lock
+    # The license/advisory policy in neuron-encrypt/deny.toml. This gate used
+    # to run only in the GitHub workflow, so the pipeline that actually
+    # publishes the release never enforced it.
+    - cd neuron-encrypt && cargo deny check && cd ..
 
 # -----------------------------------------------------------------------------
 # 2. Release fan-out

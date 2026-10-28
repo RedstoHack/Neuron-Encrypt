@@ -101,8 +101,13 @@ fun scrub(
     }
 }
 
-/// Bytes sniffed for a scrub pre-flight; the core reads the same 64-byte header.
-private const val SCRUB_SNIFF_BYTES = 64
+/// Bytes sniffed for a scrub pre-flight; the core reads the same 4 KiB header.
+///
+/// The window has to be this wide because the OOXML detector looks for the
+/// `[Content_Types].xml` entry name inside the zip local-header region. With
+/// a 64-byte window a legal `.docx` whose first entry carries an extra field
+/// was reported as "unsupported format" and could not be scrubbed at all.
+private const val SCRUB_SNIFF_BYTES = 4096
 
 /**
  * Pre-flight format check for metadata scrubbing.
