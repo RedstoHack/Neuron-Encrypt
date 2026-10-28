@@ -63,8 +63,12 @@ Supports piping, progress bars, JSON output, and silent mode for scripts.",
 "#
 )]
 struct Cli {
+    // Optional so that `--completions <shell>` works on its own: with a
+    // required subcommand, clap rejected the invocation during parsing
+    // ("requires a subcommand") and the documented completion command could
+    // never run.
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 
     /// Suppress all non-error output
     #[arg(short, long, global = true)]
@@ -135,6 +139,55 @@ enum Command {
         #[arg(long)]
         wipe_original: bool,
     },
+}
+
+/// Where the `--json` document is written.
+///
+/// stdout is the default so that `neuron-encrypt-cli encrypt -i f --json | jq`
+/// keeps working. But when the operation streams its payload to stdout
+/// (`-o -`), stdout belongs to the payload: writing the JSON document there
+/// would append a text document to the ciphertext/plaintext and silently
+/// corrupt the pipe. In that case the JSON is routed to stderr, so stdout
+/// always carries exactly one stream and never both.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum JsonMode {
+    /// `--json` was not requested.
+    #[default]
+    Off,
+    /// Write the JSON document to stdout.
+    Stdout,
+    /// Write the JSON document to stderr (stdout carries the payload).
+    Stderr,
+}
+
+impl JsonMode {
+    fn enabled(self) -> bool {
+        !matches!(self, JsonMode::Off)
+    }
+}
+
+/// Does this invocation stream its payload to stdout?
+///
+/// When it does, stdout must not also carry the JSON document.
+fn payload_goes_to_stdout(cli: &Cli) -> bool {
+    match &cli.command {
+        Some(Command::Encrypt { output, .. }) | Some(Command::Decrypt { output, .. }) => {
+            output.as_deref() == Some("-")
+        }
+        Some(Command::Scrub { output, .. }) => output.as_deref() == Some("-"),
+        None => false,
+    }
+}
+
+/// Resolve the stream the `--json` document is written to.
+fn json_mode(cli: &Cli) -> JsonMode {
+    if !cli.json {
+        JsonMode::Off
+    } else if payload_goes_to_stdout(cli) {
+        JsonMode::Stderr
+    } else {
+        JsonMode::Stdout
+    }
 }
 
 fn read_password(
@@ -367,33 +420,28 @@ fn same_path(a: &Path, b: &Path) -> bool {
     a == b
 }
 
+/// Check that the output path is usable before any work starts.
+///
+/// Returns the error to the caller rather than reporting it: the caller owns
+/// the reporting, so a failure is never announced twice (which used to print
+/// the JSON document and the error message a second time).
 fn validate_output_path(
     input_path: &Path,
     output_path: &Path,
     force: bool,
-    json: bool,
-    start: &Instant,
 ) -> Result<(), (ExitCode, String)> {
     if !output_path.exists() {
         return Ok(());
     }
 
     if !force {
-        let msg = format!(
-            "Output file already exists: {}. Use --force to overwrite.",
-            output_path.display()
-        );
-        emit_json_result(
-            json,
-            start,
-            Some(output_path.display().to_string()),
-            None,
-            None,
-            "error",
-            Some(msg.clone()),
-        );
-        eprintln!("Error: {msg}");
-        return Err((ExitCode::BadInput, msg));
+        return Err((
+            ExitCode::BadInput,
+            format!(
+                "Output file already exists: {}. Use --force to overwrite.",
+                output_path.display()
+            ),
+        ));
     }
 
     let input = fs::canonicalize(input_path).map_err(|e| {
@@ -410,33 +458,17 @@ fn validate_output_path(
     })?;
 
     if same_path(&input, &output) {
-        let msg = "Refusing to overwrite the input file in place.".to_owned();
-        emit_json_result(
-            json,
-            start,
-            Some(output_path.display().to_string()),
-            None,
-            None,
-            "error",
-            Some(msg.clone()),
-        );
-        eprintln!("Error: {msg}");
-        return Err((ExitCode::BadInput, msg));
+        return Err((
+            ExitCode::BadInput,
+            "Refusing to overwrite the input file in place.".to_owned(),
+        ));
     }
 
     if output_path.is_dir() {
-        let msg = format!("Output path is a directory: {}", output_path.display());
-        emit_json_result(
-            json,
-            start,
-            Some(output_path.display().to_string()),
-            None,
-            None,
-            "error",
-            Some(msg.clone()),
-        );
-        eprintln!("Error: {msg}");
-        return Err((ExitCode::BadInput, msg));
+        return Err((
+            ExitCode::BadInput,
+            format!("Output path is a directory: {}", output_path.display()),
+        ));
     }
 
     // Deliberately do NOT delete the existing output here. The destination is
@@ -449,10 +481,19 @@ fn validate_output_path(
     Ok(())
 }
 
-fn emit_json(result: &JsonResult) {
-    match serde_json::to_string(result) {
-        Ok(json) => println!("{json}"),
-        Err(error) => eprintln!("Error: failed to serialize JSON output: {error}"),
+fn emit_json(result: &JsonResult, mode: JsonMode) {
+    let rendered = match serde_json::to_string(result) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("Error: failed to serialize JSON output: {error}");
+            return;
+        }
+    };
+    match mode {
+        JsonMode::Stdout => println!("{rendered}"),
+        // stdout is carrying the payload in this mode — see `JsonMode`.
+        JsonMode::Stderr => eprintln!("{rendered}"),
+        JsonMode::Off => {}
     }
 }
 
@@ -470,55 +511,34 @@ fn err_json(start: &Instant, output: Option<String>, msg: &str) -> JsonResult {
     }
 }
 
-fn emit_error_json(json: bool, start: &Instant, output: Option<String>, msg: &str) {
-    if json {
-        emit_json(&err_json(start, output, msg));
+fn emit_error_json(mode: JsonMode, start: &Instant, output: Option<String>, msg: &str) {
+    if mode.enabled() {
+        emit_json(&err_json(start, output, msg), mode);
     }
 }
 
 fn emit_success_json(
-    json: bool,
+    mode: JsonMode,
     start: &Instant,
     output: Option<String>,
     bytes_processed: Option<u64>,
     sha256: Option<String>,
 ) {
-    if json {
-        emit_json(&JsonResult {
-            status: "success".into(),
-            operation: None,
-            output_path: output,
-            bytes_processed,
-            duration_ms: start.elapsed().as_millis(),
-            sha256,
-            format: None,
-            removed: None,
-            error: None,
-        });
-    }
-}
-
-fn emit_json_result(
-    json: bool,
-    start: &Instant,
-    output: Option<String>,
-    bytes_processed: Option<u64>,
-    sha256: Option<String>,
-    status: &str,
-    error: Option<String>,
-) {
-    if json {
-        emit_json(&JsonResult {
-            status: status.to_string(),
-            operation: None,
-            output_path: output,
-            bytes_processed,
-            duration_ms: start.elapsed().as_millis(),
-            sha256,
-            format: None,
-            removed: None,
-            error,
-        });
+    if mode.enabled() {
+        emit_json(
+            &JsonResult {
+                status: "success".into(),
+                operation: None,
+                output_path: output,
+                bytes_processed,
+                duration_ms: start.elapsed().as_millis(),
+                sha256,
+                format: None,
+                removed: None,
+                error: None,
+            },
+            mode,
+        );
     }
 }
 
@@ -556,14 +576,14 @@ fn run_file(
     let input_path = PathBuf::from(input_str);
     if !input_path.exists() {
         let msg = format!("Input file not found: {}", input_path.display());
-        emit_error_json(cli.json, &start, None, &msg);
+        emit_error_json(json_mode(cli), &start, None, &msg);
         eprintln!("Error: {msg}");
         return Err(ExitCode::BadInput);
     }
 
     if mode == "encrypt" && is_vx2_file(&input_path) && !cli.force {
         let msg = "Input file appears to be already encrypted (.vx2). Encrypting again will produce .vx2.vx2. Use --force to proceed.".to_owned();
-        emit_error_json(cli.json, &start, None, &msg);
+        emit_error_json(json_mode(cli), &start, None, &msg);
         eprintln!("Warning: {msg}");
         return Err(ExitCode::BadInput);
     }
@@ -571,11 +591,9 @@ fn run_file(
     let source_size = fs::metadata(&input_path).ok().map(|m| m.len());
     let output_path = resolve_output(&input_path, mode, output_str);
 
-    if let Err((code, msg)) =
-        validate_output_path(&input_path, &output_path, cli.force, cli.json, &start)
-    {
+    if let Err((code, msg)) = validate_output_path(&input_path, &output_path, cli.force) {
         emit_error_json(
-            cli.json,
+            json_mode(cli),
             &start,
             Some(output_path.display().to_string()),
             &msg,
@@ -633,9 +651,16 @@ fn run_file(
         Ok(dest) => {
             let elapsed = start.elapsed().as_millis();
             if mode == "encrypt" {
-                let hash = compute_sha256(&input_path).ok();
+                // Hash the *ciphertext* that was just written, never the
+                // plaintext. A digest of the plaintext is a
+                // confirmation-attack oracle: anyone holding a candidate of
+                // the original file could confirm it against the published
+                // digest without knowing the passphrase. The ciphertext
+                // digest serves the same integrity-check purpose and leaks
+                // nothing.
+                let hash = compute_sha256(&dest).ok();
                 emit_success_json(
-                    cli.json,
+                    json_mode(cli),
                     &start,
                     Some(dest.display().to_string()),
                     source_size,
@@ -648,13 +673,15 @@ fn run_file(
                         elapsed as f64 / 1000.0
                     );
                     if let Some(h) = &hash {
-                        eprintln!("SHA-256 (original): {h}");
+                        eprintln!("SHA-256 (encrypted file): {h}");
                     }
                 }
             } else {
-                let hash = compute_sha256(&dest).ok();
+                // Same rule on the way out: identify the encrypted container,
+                // not the recovered plaintext.
+                let hash = compute_sha256(&input_path).ok();
                 emit_success_json(
-                    cli.json,
+                    json_mode(cli),
                     &start,
                     Some(dest.display().to_string()),
                     source_size,
@@ -667,7 +694,7 @@ fn run_file(
                         elapsed as f64 / 1000.0
                     );
                     if let Some(h) = &hash {
-                        eprintln!("SHA-256 (decrypted): {h}");
+                        eprintln!("SHA-256 (encrypted file): {h}");
                     }
                 }
             }
@@ -678,7 +705,7 @@ fn run_file(
         Err(CryptoError::Cancelled) => {
             let msg = "Cancelled by user. No output file was written.";
             emit_error_json(
-                cli.json,
+                json_mode(cli),
                 &start,
                 Some(output_path.display().to_string()),
                 msg,
@@ -691,7 +718,7 @@ fn run_file(
         Err(CryptoError::DecryptionFailed) => {
             let msg = "Wrong passphrase or corrupted file.";
             emit_error_json(
-                cli.json,
+                json_mode(cli),
                 &start,
                 Some(output_path.display().to_string()),
                 msg,
@@ -704,7 +731,7 @@ fn run_file(
         Err(e) => {
             let msg = e.to_string();
             emit_error_json(
-                cli.json,
+                json_mode(cli),
                 &start,
                 Some(output_path.display().to_string()),
                 &msg,
@@ -765,7 +792,7 @@ fn run_stream(
     let result = if mode == "encrypt" {
         if is_pipe_in {
             let msg = "Encryption from stdin is not supported (requires seeking). Use a file input instead.";
-            emit_error_json(cli.json, &start, None, msg);
+            emit_error_json(json_mode(cli), &start, None, msg);
             eprintln!("Error: {msg}");
             return Err(ExitCode::BadInput);
         } else {
@@ -773,7 +800,7 @@ fn run_stream(
                 Ok(f) => f,
                 Err(e) => {
                     let msg = format!("Cannot open input: {e}");
-                    emit_error_json(cli.json, &start, None, &msg);
+                    emit_error_json(json_mode(cli), &start, None, &msg);
                     eprintln!("Error: {msg}");
                     return Err(ExitCode::BadInput);
                 }
@@ -786,19 +813,19 @@ fn run_stream(
         let mut reader: Box<dyn ReadSeek> = if is_pipe_in {
             let mut tmp = tempfile::tempfile().map_err(|e| {
                 let msg = format!("Cannot create temporary file: {e}");
-                emit_error_json(cli.json, &start, None, &msg);
+                emit_error_json(json_mode(cli), &start, None, &msg);
                 eprintln!("Error: {msg}");
                 ExitCode::RuntimeError
             })?;
             io::copy(&mut io::stdin().lock(), &mut tmp).map_err(|e| {
                 let msg = format!("Cannot read stdin: {e}");
-                emit_error_json(cli.json, &start, None, &msg);
+                emit_error_json(json_mode(cli), &start, None, &msg);
                 eprintln!("Error: {msg}");
                 ExitCode::RuntimeError
             })?;
             tmp.seek(io::SeekFrom::Start(0)).map_err(|e| {
                 let msg = format!("Cannot seek temporary file: {e}");
-                emit_error_json(cli.json, &start, None, &msg);
+                emit_error_json(json_mode(cli), &start, None, &msg);
                 eprintln!("Error: {msg}");
                 ExitCode::RuntimeError
             })?;
@@ -808,7 +835,7 @@ fn run_stream(
                 Ok(f) => Box::new(f),
                 Err(e) => {
                     let msg = format!("Cannot open input: {e}");
-                    emit_error_json(cli.json, &start, None, &msg);
+                    emit_error_json(json_mode(cli), &start, None, &msg);
                     eprintln!("Error: {msg}");
                     return Err(ExitCode::BadInput);
                 }
@@ -827,15 +854,30 @@ fn run_stream(
         } else if let Some(path) = output_str.as_deref() {
             let dest_path = Path::new(path);
             let tmp = crypto::tmp_path(dest_path);
-            let mut out = match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&tmp)
-            {
+            // The scratch file holds *decrypted plaintext*. Create it with
+            // owner-only permissions (0600) exactly like every core path
+            // does — the default umask would otherwise make it world-readable
+            // (0644) for the whole duration of the write.
+            let opened = {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(&tmp)
+                }
+                #[cfg(not(unix))]
+                {
+                    fs::OpenOptions::new().write(true).create_new(true).open(&tmp)
+                }
+            };
+            let mut out = match opened {
                 Ok(f) => f,
                 Err(e) => {
                     let msg = format!("Cannot open temporary output: {e}");
-                    emit_error_json(cli.json, &start, Some(path.to_owned()), &msg);
+                    emit_error_json(json_mode(cli), &start, Some(path.to_owned()), &msg);
                     eprintln!("Error: {msg}");
                     return Err(ExitCode::BadInput);
                 }
@@ -847,7 +889,7 @@ fn run_stream(
                     if let Err(e) = out.sync_all() {
                         let _ = fs::remove_file(&tmp);
                         let msg = format!("Cannot flush output file: {e}");
-                        emit_error_json(cli.json, &start, Some(path.to_owned()), &msg);
+                        emit_error_json(json_mode(cli), &start, Some(path.to_owned()), &msg);
                         eprintln!("Error: {msg}");
                         return Err(ExitCode::RuntimeError);
                     }
@@ -855,7 +897,7 @@ fn run_stream(
                     if let Err(e) = crypto::persist_temp_file(&tmp, dest_path) {
                         let _ = fs::remove_file(&tmp);
                         let msg = format!("Cannot save output file: {e}");
-                        emit_error_json(cli.json, &start, Some(path.to_owned()), &msg);
+                        emit_error_json(json_mode(cli), &start, Some(path.to_owned()), &msg);
                         eprintln!("Error: {msg}");
                         return Err(ExitCode::RuntimeError);
                     }
@@ -869,7 +911,7 @@ fn run_stream(
             }
         } else {
             let msg = "Output path is required when decrypting piped input unless -o - is set.";
-            emit_error_json(cli.json, &start, None, msg);
+            emit_error_json(json_mode(cli), &start, None, msg);
             eprintln!("Error: {msg}");
             return Err(ExitCode::BadInput);
         }
@@ -878,7 +920,7 @@ fn run_stream(
     match result {
         Ok(()) => {
             let elapsed = start.elapsed().as_millis();
-            emit_success_json(cli.json, &start, success_output_path, source_size, None);
+            emit_success_json(json_mode(cli), &start, success_output_path, source_size, None);
             if !cli.quiet && !cli.json {
                 eprintln!("✓ Complete ({:.2}s)", elapsed as f64 / 1000.0);
             }
@@ -886,7 +928,7 @@ fn run_stream(
         }
         Err(CryptoError::Cancelled) => {
             let msg = "Cancelled by user. No output file was written.";
-            emit_error_json(cli.json, &start, None, msg);
+            emit_error_json(json_mode(cli), &start, None, msg);
             if !cli.json {
                 eprintln!("X {msg}");
             }
@@ -895,7 +937,7 @@ fn run_stream(
 
         Err(CryptoError::DecryptionFailed) => {
             let msg = "Wrong passphrase or corrupted file.";
-            emit_error_json(cli.json, &start, None, msg);
+            emit_error_json(json_mode(cli), &start, None, msg);
             if !cli.json {
                 eprintln!("✗ {msg}");
             }
@@ -903,7 +945,7 @@ fn run_stream(
         }
         Err(e) => {
             let msg = e.to_string();
-            emit_error_json(cli.json, &start, None, &msg);
+            emit_error_json(json_mode(cli), &start, None, &msg);
             if !cli.json {
                 eprintln!("✗ {msg}");
             }
@@ -923,13 +965,13 @@ fn run_scrub(
     let input_path = PathBuf::from(input_str);
     if !input_path.exists() {
         let msg = format!("Input file not found: {}", input_path.display());
-        emit_error_json(cli.json, &start, None, &msg);
+        emit_error_json(json_mode(cli), &start, None, &msg);
         eprintln!("Error: {msg}");
         return Err(ExitCode::BadInput);
     }
     if input_str == "-" {
         let msg = "Metadata scrubbing requires a seekable file; piped input is not supported.";
-        emit_error_json(cli.json, &start, None, msg);
+        emit_error_json(json_mode(cli), &start, None, msg);
         eprintln!("Error: {msg}");
         return Err(ExitCode::BadInput);
     }
@@ -976,17 +1018,20 @@ fn run_scrub(
             let removed_names = report.format.name().to_string();
 
             if cli.json {
-                emit_json(&JsonResult {
-                    status: "success".into(),
-                    operation: Some("scrub".into()),
-                    output_path: Some(out_display.display().to_string()),
-                    bytes_processed: Some(report.bytes_before),
-                    duration_ms: elapsed,
-                    sha256: None,
-                    format: Some(removed_names),
-                    removed: Some(report.removed.clone()),
-                    error: None,
-                });
+                emit_json(
+                    &JsonResult {
+                        status: "success".into(),
+                        operation: Some("scrub".into()),
+                        output_path: Some(out_display.display().to_string()),
+                        bytes_processed: Some(report.bytes_before),
+                        duration_ms: elapsed,
+                        sha256: None,
+                        format: Some(removed_names),
+                        removed: Some(report.removed.clone()),
+                        error: None,
+                    },
+                    json_mode(cli),
+                );
             } else if !cli.quiet {
                 if report.removed.is_empty() {
                     eprintln!(
@@ -1016,7 +1061,7 @@ fn run_scrub(
         }
         Err(CryptoError::Cancelled) => {
             let msg = "Cancelled by user. The source file was left untouched.";
-            emit_error_json(cli.json, &start, None, msg);
+            emit_error_json(json_mode(cli), &start, None, msg);
             if !cli.json {
                 eprintln!("\u{2717} {msg}");
             }
@@ -1024,7 +1069,7 @@ fn run_scrub(
         }
         Err(CryptoError::UnsupportedMediaFormat(reason)) => {
             let msg = format!("Unsupported format \u{2014} {reason}. File left unmodified.");
-            emit_error_json(cli.json, &start, None, &msg);
+            emit_error_json(json_mode(cli), &start, None, &msg);
             if !cli.json {
                 eprintln!("\u{2717} {msg}");
             }
@@ -1032,7 +1077,7 @@ fn run_scrub(
         }
         Err(e) => {
             let msg = e.to_string();
-            emit_error_json(cli.json, &start, None, &msg);
+            emit_error_json(json_mode(cli), &start, None, &msg);
             if !cli.json {
                 eprintln!("\u{2717} {msg}");
             }
@@ -1050,6 +1095,16 @@ fn run() -> Result<(), ExitCode> {
         return Ok(());
     }
 
+    // A subcommand is required for every operation; only `--completions` may
+    // run without one.
+    let Some(command) = &cli.command else {
+        let msg = "No subcommand given. Try 'encrypt', 'decrypt', 'scrub' or '--completions <shell>'.";
+        emit_error_json(json_mode(&cli), &Instant::now(), None, msg);
+        eprintln!("Error: {msg}");
+        Cli::command().print_help().ok();
+        return Err(ExitCode::BadInput);
+    };
+
     let start = Instant::now();
 
     if let Command::Scrub {
@@ -1057,24 +1112,24 @@ fn run() -> Result<(), ExitCode> {
         output,
         in_place,
         wipe_original,
-    } = &cli.command
+    } = command
     {
         return run_scrub(&cli, start, input, output, *in_place, *wipe_original);
     }
 
-    let (input_str, output_str, mode) = match &cli.command {
+    let (input_str, output_str, mode) = match command {
         Command::Encrypt { input, output, .. } => (input.clone(), output.clone(), "encrypt"),
         Command::Decrypt { input, output } => (input.clone(), output.clone(), "decrypt"),
         Command::Scrub { .. } => unreachable!("handled above"),
     };
-    let password = match &cli.command {
+    let password = match command {
         Command::Encrypt { no_confirm, .. }
             if std::env::var("NEURON_PASSWORD").is_err() && !no_confirm =>
         {
             match read_password_confirmed(&cli.password_file) {
                 Ok(password) => password,
                 Err((code, msg)) => {
-                    emit_error_json(cli.json, &start, None, &msg);
+                    emit_error_json(json_mode(&cli), &start, None, &msg);
                     eprintln!("Error: {msg}");
                     return Err(code);
                 }
@@ -1083,7 +1138,7 @@ fn run() -> Result<(), ExitCode> {
         _ => match read_password(&cli.password_file) {
             Ok(password) => password,
             Err((code, msg)) => {
-                emit_error_json(cli.json, &start, None, &msg);
+                emit_error_json(json_mode(&cli), &start, None, &msg);
                 eprintln!("Error: {msg}");
                 return Err(code);
             }
@@ -1095,7 +1150,7 @@ fn run() -> Result<(), ExitCode> {
             "Passphrase too short (minimum {} bytes).",
             crypto::MIN_PASSWORD_LEN
         );
-        emit_error_json(cli.json, &start, None, &msg);
+        emit_error_json(json_mode(&cli), &start, None, &msg);
         eprintln!("Error: {msg}");
         return Err(ExitCode::BadInput);
     }

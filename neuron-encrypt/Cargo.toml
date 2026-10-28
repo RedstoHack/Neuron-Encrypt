@@ -39,6 +39,11 @@ required-features = ["gui"]
 [[bin]]
 name = "neuron-encrypt-cli"
 path = "src/bin/cli.rs"
+# The CLI's `scrub` subcommand is built on the core's metadata module, so it
+# cannot be built without the `metadata` feature. Declaring it here keeps
+# `cargo build --no-default-features` (a pure-crypto build) from failing with
+# "unresolved import" instead of simply skipping this binary.
+required-features = ["metadata"]
 
 [dependencies]
 aes-gcm-siv = { version = "0.11", features = ["std", "aes"] }
@@ -102,4 +107,19 @@ opt-level     = 3
 lto           = true
 codegen-units = 1
 strip         = true
-panic         = "abort"
+# NOT `panic = "abort"`.
+#
+# Two reasons, both about hostile input:
+#
+#  1. The metadata scrubber parses attacker-controlled files with third-party
+#     crates (lofty, lopdf, zip). A panic in one of them used to abort the
+#     whole process — in the Windows GUI, which has no console, that is a
+#     silent death with no message. With unwinding, the scrubber catches the
+#     panic and turns it into the ordinary "unsupported / malformed file"
+#     error its fail-closed contract promises.
+#  2. With `abort`, the `Drop` impls of the `Zeroizing` guards never run on a
+#     panic, so a passphrase or plaintext buffer could survive in RAM. With
+#     unwinding they are wiped during the unwind.
+#
+# The Android JNI crate never set `panic = "abort"` either, so its
+# `catch_unwind` wrappers around the native entry points work as intended.

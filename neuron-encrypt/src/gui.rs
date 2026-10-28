@@ -105,6 +105,13 @@ enum GuiMsg {
     Progress(f32, String),
     Done(String, Option<String>),
     Error(CryptoError),
+    /// The user cancelled and the operation stopped without writing output.
+    ///
+    /// This is a distinct variant rather than a `Done` with a magic string:
+    /// the UI has to be able to tell "the user stopped this" apart from "this
+    /// finished", because a cancel that arrives *after* the operation has
+    /// already written its output must still report that output.
+    Cancelled,
     // Batch messages
     BatchFileProgress(usize, f32, String), // (file_index, progress, message)
     BatchFileDone(usize, PathBuf, Option<String>), // (file_index, dest_path, sha256)
@@ -262,7 +269,10 @@ fn eval_strength(password: &str) -> (Strength, f32, &'static str) {
 
 /// Penalize repeated characters (aaa, 111, !!!).
 fn repeated_chars_penalty(password: &str) -> f64 {
-    let chars: Vec<char> = password.chars().collect();
+    // The collected characters are a copy of the passphrase, so they are
+    // wrapped in `Zeroizing` and wiped when the function returns. This runs
+    // on every repaint while the user types.
+    let chars: Zeroizing<Vec<char>> = Zeroizing::new(password.chars().collect());
     let mut penalty = 0.0f64;
     let mut run_len = 1usize;
     for i in 1..chars.len() {
@@ -283,7 +293,8 @@ fn repeated_chars_penalty(password: &str) -> f64 {
 
 /// Penalize keyboard/alphabetical sequences (abc, 123, qwerty).
 fn sequence_penalty(password: &str) -> f64 {
-    let lower = password.to_lowercase();
+    // A lowercased copy of the passphrase — zeroized on the way out.
+    let lower = Zeroizing::new(password.to_lowercase());
     let sequences = [
         "abcdefghijklmnopqrstuvwxyz",
         "qwertyuiop",
@@ -320,7 +331,8 @@ fn sequence_penalty(password: &str) -> f64 {
 
 /// Penalize common passwords (subset of top 100).
 fn common_password_penalty(password: &str) -> f64 {
-    let lower = password.to_lowercase();
+    // A lowercased copy of the passphrase — zeroized on the way out.
+    let lower = Zeroizing::new(password.to_lowercase());
     let common = [
         "password",
         "pass",
@@ -359,7 +371,7 @@ fn common_password_penalty(password: &str) -> f64 {
     ];
 
     for cp in &common {
-        if lower == *cp || lower.starts_with(cp) {
+        if lower.as_str() == *cp || lower.starts_with(cp) {
             return 40.0;
         }
     }
@@ -403,6 +415,18 @@ impl NeuronEncryptApp {
         }
     }
 
+    /// Cancel any operation still running against the current flag and
+    /// install a fresh one for the next operation.
+    ///
+    /// The flag used to be *reset* here. That silently un-cancelled an
+    /// in-flight worker: the operation kept running and wrote its output
+    /// while the UI had already returned to the start screen. Setting the old
+    /// flag to `true` stops that worker; the replacement starts clean.
+    fn renew_cancel_flag(&mut self) {
+        self.cancel_flag.store(true, Ordering::SeqCst);
+        self.cancel_flag = Arc::new(AtomicBool::new(false));
+    }
+
     fn secure_wipe_session(&mut self, ctx: &egui::Context) {
         self.mode = Mode::Encrypt;
         self.password = Zeroizing::new(String::new());
@@ -424,7 +448,7 @@ impl NeuronEncryptApp {
         self.batch_scrub = false;
         self.strength_frac = 0.0;
         self.check_anim = 0.0;
-        self.cancel_flag.store(false, Ordering::SeqCst);
+        self.renew_cancel_flag();
 
         // Clear all GUI state and focus to drop transient internal buffers
         ctx.memory_mut(|mem| {
@@ -450,7 +474,7 @@ impl NeuronEncryptApp {
         self.progress = 0.0;
         self.prog_frac = 0.0;
         self.reencrypt_confirmed = false;
-        self.cancel_flag.store(false, Ordering::SeqCst);
+        self.renew_cancel_flag();
     }
 
     fn pick_file(&mut self) {
@@ -581,7 +605,9 @@ impl NeuronEncryptApp {
         self.progress = 0.0;
         self.prog_frac = 0.0;
         self.status = Some("Preparing secure file operation...".to_owned());
-        self.cancel_flag.store(false, Ordering::SeqCst);
+        // Install a *fresh* cancellation flag. Resetting the existing one
+        // would silently un-cancel an operation that is still running.
+        self.renew_cancel_flag();
 
         let (tx, rx) = mpsc::unbounded();
         self.crypto_rx = Some(rx);
@@ -622,18 +648,21 @@ impl NeuronEncryptApp {
 
             match result {
                 Ok(_) => {
-                    // P2-4: always hash the OUTPUT file (ciphertext on encrypt, plaintext on decrypt).
-                    // Avoids leaking a plaintext-hash verifier via screenshots.
-                    let hash = compute_sha256(&dest);
+                    // The digest always identifies the *encrypted container*:
+                    // the .vx2 on encrypt, and the .vx2 that was read on
+                    // decrypt. Hashing the recovered plaintext would publish
+                    // a confirmation-attack verifier for it — anyone holding a
+                    // candidate of the original file could check it against
+                    // the digest shown on screen.
+                    let hash = compute_sha256(if mode == Mode::Encrypt { &dest } else { &file_path });
                     let _ = tx.try_send(GuiMsg::Done("Operation complete.".to_owned(), hash));
                 }
                 Err(CryptoError::Cancelled) => {
-                    // P1-2: user pressed Cancel. Report as Done (not Error) with a
-                    // clear message so the user doesn't see a scary "Error" screen.
-                    let _ = tx.try_send(GuiMsg::Done(
-                        "Operation cancelled by user. No output file was written.".to_owned(),
-                        None,
-                    ));
+                    // The user pressed Cancel. Report it as a cancellation, not
+                    // as an error and not as a success — the UI must be able
+                    // to say "nothing was written" without hiding the fact
+                    // that the session is being torn down.
+                    let _ = tx.try_send(GuiMsg::Cancelled);
                 }
                 Err(e) => {
                     let _ = tx.try_send(GuiMsg::Error(e));
@@ -668,7 +697,9 @@ impl NeuronEncryptApp {
         self.progress = 0.0;
         self.prog_frac = 0.0;
         self.status = Some("Preparing secure file operation...".to_owned());
-        self.cancel_flag.store(false, Ordering::SeqCst);
+        // Install a *fresh* cancellation flag. Resetting the existing one
+        // would silently un-cancel an operation that is still running.
+        self.renew_cancel_flag();
 
         let (tx, rx) = mpsc::unbounded();
         self.crypto_rx = Some(rx);
@@ -709,10 +740,7 @@ impl NeuronEncryptApp {
                     let _ = tx.try_send(GuiMsg::Done(summary, None));
                 }
                 Err(CryptoError::Cancelled) => {
-                    let _ = tx.try_send(GuiMsg::Done(
-                        "Operation cancelled by user. No output file was written.".to_owned(),
-                        None,
-                    ));
+                    let _ = tx.try_send(GuiMsg::Cancelled);
                 }
                 Err(e) => {
                     let _ = tx.try_send(GuiMsg::Error(e));
@@ -743,7 +771,8 @@ impl NeuronEncryptApp {
         self.batch_current_file_progress = 0.0;
         self.progress = 0.0;
         self.prog_frac = 0.0;
-        self.cancel_flag.store(false, Ordering::SeqCst);
+        // Fresh cancellation flag for this run (see `renew_cancel_flag`).
+        self.renew_cancel_flag();
 
         let (tx, rx) = mpsc::unbounded();
         self.crypto_rx = Some(rx);
@@ -876,7 +905,8 @@ impl NeuronEncryptApp {
         self.batch_current_file_progress = 0.0;
         self.progress = 0.0;
         self.prog_frac = 0.0;
-        self.cancel_flag.store(false, Ordering::SeqCst);
+        // Fresh cancellation flag for this run (see `renew_cancel_flag`).
+        self.renew_cancel_flag();
 
         let (tx, rx) = mpsc::unbounded();
         self.crypto_rx = Some(rx);
@@ -963,10 +993,17 @@ impl NeuronEncryptApp {
 
                 match result {
                     Ok(out_path) => {
-                        // C2-1 fix: always hash the OUTPUT file (ciphertext on encrypt,
-                        // plaintext on decrypt). Previously batch mode hashed the source
-                        // on encrypt — a screenshot-leak verifier for the plaintext.
-                        let hash = compute_sha256(&out_path);
+                        // The digest always identifies the encrypted container:
+                        // the .vx2 written on encrypt, and the .vx2 that was
+                        // read on decrypt. Batch mode used to hash the
+                        // *source* on encrypt — a screenshot-leak verifier for
+                        // the plaintext — and the recovered plaintext on
+                        // decrypt, which has the same problem.
+                        let hash = compute_sha256(if mode == Mode::Encrypt {
+                            &out_path
+                        } else {
+                            src
+                        });
                         let _ = tx.try_send(GuiMsg::BatchFileDone(idx, out_path, hash));
                     }
                     Err(CryptoError::Cancelled) => {
@@ -1724,7 +1761,10 @@ impl NeuronEncryptApp {
             && !self.password.is_empty()
             && !self.confirm_password.is_empty()
             && !constant_time_eq(self.password.as_bytes(), self.confirm_password.as_bytes());
-        let disabled = self.password.chars().count() < crypto::MIN_PASSWORD_LEN
+        // Scrubbing needs no passphrase, so the length rule must not apply to it.
+        let needs_passphrase = self.mode != Mode::Scrub;
+        let disabled = (needs_passphrase
+            && self.password.chars().count() < crypto::MIN_PASSWORD_LEN)
             || mismatch
             || (self.mode == Mode::Encrypt
                 && self
@@ -1733,43 +1773,21 @@ impl NeuronEncryptApp {
                     .is_some_and(|path| is_vx2_file(path))
                 && !self.reencrypt_confirmed);
 
-        let is_vx2 = self.selected_file.as_ref().is_some_and(|p| is_vx2_file(p));
+        // The button's label and the action it performs must come from the
+        // same source. The label used to follow the *file extension* while
+        // `execute()` followed `self.mode`: picking a non-`.vx2` file and
+        // switching the mode to DECRYPT showed an "ENCRYPT" button that
+        // actually decrypted the file.
+        let label = match self.mode {
+            Mode::Encrypt => "ENCRYPT",
+            Mode::Decrypt => "DECRYPT",
+            Mode::Scrub => "SCRUB METADATA",
+        };
 
-        if self.mode == Mode::Scrub {
-            if self
-                .draw_button(
-                    ui,
-                    "SCRUB METADATA",
-                    vec2(ui.available_width(), 44.0),
-                    ButtonKind::Primary,
-                    true,
-                )
-                .clicked()
-            {
-                self.execute(ctx);
-            }
-            return;
-        }
-
-        if is_vx2 {
-            let decrypt_disabled = self.password.chars().count() < crypto::MIN_PASSWORD_LEN;
-            if self
-                .draw_button(
-                    ui,
-                    "DECRYPT",
-                    vec2(ui.available_width(), 44.0),
-                    ButtonKind::Primary,
-                    !decrypt_disabled,
-                )
-                .clicked()
-                && !decrypt_disabled
-            {
-                self.execute(ctx);
-            }
-        } else if self
+        if self
             .draw_button(
                 ui,
-                "ENCRYPT",
+                label,
                 vec2(ui.available_width(), 44.0),
                 ButtonKind::Primary,
                 !disabled,
@@ -1955,7 +1973,7 @@ impl NeuronEncryptApp {
                     .default_open(false)
                     .show(ui, |ui| {
                         ui.label(
-                            egui::RichText::new("SHA-256 (output file)")
+                            egui::RichText::new("SHA-256 (encrypted file)")
                                 .font(FontId::new(9.5, FontFamily::Monospace))
                                 .color(Palette::TEXT_LO),
                         );
@@ -2346,23 +2364,30 @@ impl eframe::App for NeuronEncryptApp {
                     self.status = Some(truncate_chars(&sanitize_text(&text), 72));
                 }
                 GuiMsg::Done(message, hash) => {
-                    if self.cancel_flag.load(Ordering::SeqCst) {
-                        self.secure_wipe_session(ctx);
-                    } else {
-                        self.status = Some(sanitize_text(&message));
-                        self.sha256_hash = hash;
-                        self.flow = AppFlow::Success;
-                        self.check_anim = 0.0;
-                    }
+                    // A completed operation is reported as completed even if
+                    // the cancel flag happens to be set: the output really was
+                    // written, and hiding that would leave the user looking
+                    // for a file that exists.
+                    self.status = Some(sanitize_text(&message));
+                    self.sha256_hash = hash;
+                    self.flow = AppFlow::Success;
+                    self.check_anim = 0.0;
                     self.crypto_rx = None;
                 }
                 GuiMsg::Error(error) => {
-                    if self.cancel_flag.load(Ordering::SeqCst) {
-                        self.secure_wipe_session(ctx);
-                    } else {
-                        self.status = Some(sanitize_text(&error.to_string()));
-                        self.flow = AppFlow::Failure;
-                    }
+                    // A genuine failure is reported as a failure. Swallowing it
+                    // because the user had also pressed Cancel used to return
+                    // to the start screen with no explanation at all.
+                    self.status = Some(sanitize_text(&error.to_string()));
+                    self.flow = AppFlow::Failure;
+                    self.crypto_rx = None;
+                }
+                GuiMsg::Cancelled => {
+                    // The user stopped the operation. Tear the session down
+                    // (the passphrase must not linger) but say so — the old
+                    // code returned to the start screen with no message at all.
+                    self.secure_wipe_session(ctx);
+                    self.status = Some("Operation cancelled. No output file was written.".to_owned());
                     self.crypto_rx = None;
                 }
                 GuiMsg::BatchFileProgress(idx, progress, msg) => {
@@ -2382,12 +2407,12 @@ impl eframe::App for NeuronEncryptApp {
                     }
                 }
                 GuiMsg::BatchAllDone => {
-                    if self.cancel_flag.load(Ordering::SeqCst) {
-                        self.secure_wipe_session(ctx);
-                    } else {
-                        self.flow = AppFlow::BatchDone;
-                        self.check_anim = 0.0;
-                    }
+                    // Always show the summary. A cancelled batch still wrote
+                    // the files it had already finished, and the per-file
+                    // results carry the "Cancelled" markers for the rest —
+                    // wiping the screen would hide both.
+                    self.flow = AppFlow::BatchDone;
+                    self.check_anim = 0.0;
                     self.crypto_rx = None;
                 }
             }
