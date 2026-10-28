@@ -125,7 +125,14 @@ pub enum ScrubOutput {
     InPlace,
 }
 
-const SCRUB_READ_HEADER_LEN: usize = 64;
+/// Bytes sniffed from the front of a file to detect its container format.
+///
+/// 4 KiB, not 64: the OOXML detector looks for the `[Content_Types].xml` entry
+/// name inside the zip local-header region, and a package whose first entry
+/// carries an extra field (or whose header is preceded by a data descriptor)
+/// pushes that name past byte 64. A 64-byte window silently rejected legal
+/// `.docx`/`.xlsx` files as "unsupported".
+const SCRUB_READ_HEADER_LEN: usize = 4096;
 /// In-memory rewrite cap for format families that need whole-file parsing.
 /// Media containers (audio/video) go through streaming rewriters instead.
 ///
@@ -203,8 +210,7 @@ pub fn detect_media_format(header: &[u8]) -> Option<MediaFormat> {
     }
     if header.starts_with(b"PK\x03\x04") {
         // An OOXML package carries [Content_Types].xml; plain zips do not.
-        let window = &header[..header.len().min(4096).min(header.len())];
-        if find_subslice(window, b"[Content_Types].xml").is_some() {
+        if find_subslice(header, b"[Content_Types].xml").is_some() {
             return Some(MediaFormat::Ooxml);
         }
         return None;
@@ -265,6 +271,26 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
         .position(|window| window == needle)
+}
+
+/// Run a container parser, turning a panic into an ordinary error.
+///
+/// The scrubber's contract is *fail closed*: a file it cannot fully
+/// understand must be rejected with an explanation and leave the source
+/// untouched — never crash the process. The container parsers (lofty, lopdf,
+/// zip) run on attacker-controlled bytes, and a panic inside one of them is
+/// a real possibility: a WAV whose RIFF chunk claims `u32::MAX` bytes made
+/// lofty's writer overflow an unchecked addition.
+///
+/// The release profile deliberately does not use `panic = "abort"`, so the
+/// unwind reaches here and becomes a normal error.
+fn catch_panic<T>(what: &str, f: impl FnOnce() -> CryptoResult<T>) -> CryptoResult<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(result) => result,
+        Err(_) => Err(CryptoError::MalformedFile(format!(
+            "{what} parser could not handle this file"
+        ))),
+    }
 }
 
 fn read_header(path: &Path) -> CryptoResult<Vec<u8>> {
@@ -482,7 +508,8 @@ pub fn scrub_file(
             | MediaFormat::Gif
             | MediaFormat::Tiff => {
                 let data = read_all_capped(src, source_len)?;
-                let (cleaned, removed) = images::scrub_image(format, &data)?;
+                let (cleaned, removed) =
+                    catch_panic("image", || images::scrub_image(format, &data))?;
                 out.write_all(&cleaned)?;
                 out.sync_all()?;
                 drop(out);
@@ -490,7 +517,8 @@ pub fn scrub_file(
             }
             MediaFormat::Pdf | MediaFormat::Ooxml => {
                 let data = read_all_capped(src, source_len)?;
-                let (cleaned, removed) = documents::scrub_document(format, &data)?;
+                let (cleaned, removed) =
+                    catch_panic("document", || documents::scrub_document(format, &data))?;
                 out.write_all(&cleaned)?;
                 out.sync_all()?;
                 drop(out);
@@ -506,7 +534,7 @@ pub fn scrub_file(
             | MediaFormat::Mp4
             | MediaFormat::MobileMp4 => {
                 drop(out);
-                let removed = media::scrub_media_file(src, &tmp)?;
+                let removed = catch_panic("media", || media::scrub_media_file(src, &tmp, format))?;
                 if let Ok(f) = fs::File::open(&tmp) {
                     let _ = f.sync_all();
                 }

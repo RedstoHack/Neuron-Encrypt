@@ -783,7 +783,7 @@ fn mp3_tags_removed_sync_frame_kept() {
 
     let dest = dir.join("scratch.mp3");
     std::fs::File::create(&dest).unwrap();
-    let removed = super::media::scrub_media_file(&src_path, &dest).unwrap();
+    let removed = super::media::scrub_media_file(&src_path, &dest, MediaFormat::Mp3).unwrap();
 
     let out = std::fs::read(&dest).unwrap();
     assert!(removed.iter().any(|r| r.contains("ID3v2")), "{removed:?}");
@@ -801,7 +801,7 @@ fn wav_riff_info_removed_pcm_kept() {
 
     let dest = dir.join("scratch.wav");
     std::fs::File::create(&dest).unwrap();
-    let removed = super::media::scrub_media_file(&src_path, &dest).unwrap();
+    let removed = super::media::scrub_media_file(&src_path, &dest, MediaFormat::Wav).unwrap();
 
     let out = std::fs::read(&dest).unwrap();
     assert!(
@@ -823,7 +823,7 @@ fn flac_comments_removed_streaminfo_kept() {
 
     let dest = dir.join("scratch.flac");
     std::fs::File::create(&dest).unwrap();
-    let removed = super::media::scrub_media_file(&src_path, &dest).unwrap();
+    let removed = super::media::scrub_media_file(&src_path, &dest, MediaFormat::Flac).unwrap();
 
     let out = std::fs::read(&dest).unwrap();
     assert!(removed.iter().any(|r| r.contains("Vorbis")), "{removed:?}");

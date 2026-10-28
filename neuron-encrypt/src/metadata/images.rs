@@ -71,10 +71,16 @@ fn scrub_jpeg(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             0xD8 | 0x01 | 0xD0..=0xD7 => {
                 out.extend_from_slice(&data[marker_start..pos]);
             }
-            // End of image — done.
+            // End of image.
             0xD9 => {
-                out.extend_from_slice(&data[marker_start..pos]);
-                break;
+                // The scan branch below returns as soon as it sees an SOS
+                // marker, so reaching EOI here means the file never had any
+                // image data: it is a header-only stub (e.g. `FF D8` + APP0 +
+                // `FF D9`). Accepting one would let `--in-place` replace a
+                // real photo with a stub no decoder can render, so fail closed.
+                return Err(CryptoError::MalformedFile(
+                    "JPEG has no SOS marker (no image data)".to_string(),
+                ));
             }
             // Start of scan: everything after is entropy-coded data.
             JPEG_SOS => {
@@ -118,8 +124,8 @@ fn scrub_jpeg(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             }
         }
     }
-
-    Ok((out, dedup(removed)))
+    // The loop never breaks: the scan branch returns the cleaned file and the
+    // end-of-image branch returns an error, so there is no normal exit.
 }
 
 fn marker_len(data: &[u8], payload_start: usize) -> CryptoResult<usize> {
@@ -162,16 +168,31 @@ fn scrub_png(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     let mut removed = Vec::new();
     let mut pos = 8usize;
     let mut saw_iend = false;
+    let mut saw_ihdr = false;
+    let mut saw_idat = false;
 
     while pos + 12 <= data.len() {
         let len =
             u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         let kind = [data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]];
-        let end = pos + 12 + len;
+        // `len` comes straight from the file and may be up to 4 GiB - 1. On a
+        // 32-bit target (armeabi-v7a, x86) `pos + 12 + len` can wrap, which
+        // would slip past the bounds check below and panic on the slice.
+        let Some(end) = pos.checked_add(12).and_then(|v| v.checked_add(len)) else {
+            return Err(CryptoError::MalformedFile(
+                "PNG chunk length overflows".to_string(),
+            ));
+        };
         if end > data.len() {
             return Err(CryptoError::MalformedFile(
                 "PNG chunk overruns file".to_string(),
             ));
+        }
+
+        if &kind == b"IHDR" {
+            saw_ihdr = true;
+        } else if &kind == b"IDAT" {
+            saw_idat = true;
         }
 
         if META_CHUNKS.iter().any(|t| **t == kind) {
@@ -200,6 +221,20 @@ fn scrub_png(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     if !saw_iend {
         return Err(CryptoError::MalformedFile(
             "PNG is truncated (no IEND chunk)".to_string(),
+        ));
+    }
+
+    // A PNG is defined as: signature, IHDR, at least one IDAT, IEND. Without
+    // IHDR or IDAT the file carries no image data — the same stub-file hazard
+    // that the IEND check above closes for truncated inputs.
+    if !saw_ihdr {
+        return Err(CryptoError::MalformedFile(
+            "PNG has no IHDR chunk (no image data)".to_string(),
+        ));
+    }
+    if !saw_idat {
+        return Err(CryptoError::MalformedFile(
+            "PNG has no IDAT chunk (no image data)".to_string(),
         ));
     }
 
@@ -276,9 +311,17 @@ fn scrub_webp(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         ));
     }
 
+    // The RIFF chunk size is a u32 and counts the "WEBP" fourcc plus the body.
+    // Use a checked conversion so an oversized body is rejected rather than
+    // silently wrapping into a corrupt length field.
+    let riff_len = u32::try_from(body.len())
+        .ok()
+        .and_then(|len| len.checked_add(4))
+        .ok_or_else(|| CryptoError::MalformedFile("WebP body is too large for RIFF".to_string()))?;
+
     let mut out = Vec::with_capacity(body.len() + 8);
     out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(body.len() as u32 + 4).to_le_bytes());
+    out.extend_from_slice(&riff_len.to_le_bytes());
     out.extend_from_slice(b"WEBP");
     out.extend_from_slice(&body);
 
@@ -560,7 +603,16 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     let le = match &data[0..2] {
         b"II" => true,
         b"MM" => false,
-        _ => unreachable!("detect_media_format guarantees II/MM"),
+        // `scrub_image` is a public API and can be called with any format, so
+        // the "detect_media_format guarantees II/MM" invariant does not hold
+        // for library consumers. Abort with a normal error instead of a
+        // panic — the release profile is `panic = "abort"`, so a panic here
+        // kills the process with no message.
+        _ => {
+            return Err(CryptoError::MalformedFile(
+                "TIFF has no byte-order mark (expected II or MM)".to_string(),
+            ))
+        }
     };
     let ctx = TiffCtx { le };
 

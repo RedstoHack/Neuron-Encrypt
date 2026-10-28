@@ -104,6 +104,43 @@ const OOXML_DROP_PARTS: [&str; 4] = [
     "docProps/thumbnail",
 ];
 
+/// Maximum expansion ratio tolerated between an archive member's compressed and
+/// uncompressed size.
+///
+/// A zip member's declared uncompressed size lives in the archive header and is
+/// never checked by the format: the writer may claim any size it likes. Real
+/// OOXML packages expand far less than this (XML compresses roughly 10:1), so
+/// 100:1 leaves a wide margin for legitimate content while stopping a small
+/// archive from claiming gigabytes.
+const MAX_ZIP_EXPANSION_RATIO: u64 = 100;
+
+/// Slack added to the ratio allowance so that tiny members (an empty file, a
+/// short XML part) are never rejected by the ratio rule alone.
+const ZIP_RATIO_SLACK: u64 = 64 * 1024;
+
+/// Largest uncompressed size a single archive member may have.
+///
+/// Bounded by the platform in-memory scrub cap so a hostile member cannot make
+/// the process allocate more than the module already accepts for the whole
+/// file (64 MiB on Android, 1 GiB on desktop).
+fn zip_member_limit(compressed_size: u64) -> u64 {
+    let ratio_limit = compressed_size
+        .saturating_mul(MAX_ZIP_EXPANSION_RATIO)
+        .saturating_add(ZIP_RATIO_SLACK);
+    ratio_limit.min(super::IN_MEMORY_SCRUB_CAP)
+}
+
+/// Reject an archive member whose declared uncompressed size exceeds `limit`.
+fn check_zip_member_size(name: &str, declared: u64, compressed: u64) -> CryptoResult<()> {
+    let limit = zip_member_limit(compressed);
+    if declared > limit {
+        return Err(CryptoError::MalformedFile(format!(
+            "OOXML entry {name} declares {declared} uncompressed bytes (limit {limit}) — refused"
+        )));
+    }
+    Ok(())
+}
+
 fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     use std::io::{Read, Write};
     use zip::write::SimpleFileOptions;
@@ -130,8 +167,26 @@ fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
 
         // Read the full entry, then patch the two index parts that reference
         // docProps so the package stays valid after their removal.
-        let mut bytes = Vec::with_capacity(file.size() as usize);
-        file.read_to_end(&mut bytes).map_err(CryptoError::from)?;
+        //
+        // The declared uncompressed size is attacker-controlled, so it is
+        // validated against the expansion ratio and the in-memory cap *before*
+        // any allocation, and the read itself is bounded by the same limit —
+        // the declared size can also lie about how much data follows.
+        let declared = file.size();
+        let compressed = file.compressed_size();
+        check_zip_member_size(&name, declared, compressed)?;
+
+        let limit = zip_member_limit(compressed);
+        let mut bytes = Vec::new();
+        (&mut file)
+            .take(limit.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(CryptoError::from)?;
+        if bytes.len() as u64 > limit {
+            return Err(CryptoError::MalformedFile(format!(
+                "OOXML entry {name} decompressed past its declared size — refused"
+            )));
+        }
 
         let patched = match name.as_str() {
             "[Content_Types].xml" => remove_xml_elements(&bytes, b"<Override", &|elem| {

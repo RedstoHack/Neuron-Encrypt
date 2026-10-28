@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use super::{detect_media_format, scrub_file, MediaFormat, ScrubOutput};
+use super::{default_scrub_output_name, detect_media_format, scrub_file, MediaFormat, ScrubOutput};
 use crate::crypto::ProgressReporter;
 use crate::error::CryptoError;
 
@@ -85,6 +85,13 @@ fn jpeg_with_exif() -> Vec<u8> {
     out.extend_from_slice(&[
         0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
     ]);
+    // DHT: one empty table (Tc/Th = 0x00, 16 zero counts, no symbols).
+    out.extend_from_slice(&[0xFF, 0xC4, 0x00, 0x13, 0x00]);
+    out.extend_from_slice(&[0u8; 16]);
+    // SOS: Ns = 1, one component spec, Ss/Se/Ah-Al.
+    out.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00]);
+    // Entropy-coded data followed by EOI.
+    out.extend_from_slice(&[0x12, 0x34, 0x56, 0xAB, 0xCD]);
     out.extend_from_slice(&[0xFF, 0xD9]);
     out
 }
@@ -217,6 +224,49 @@ fn wav_with_list_info() -> Vec<u8> {
     out.extend_from_slice(b"WAVE");
     out.extend_from_slice(&chunks);
     out
+}
+
+/// A WAV whose RIFF chunk declares a length far beyond the actual data.
+///
+/// lofty's WAV writer adds to that field without a checked addition, so the
+/// file used to panic with "attempt to add with overflow" — and because the
+/// release profile is `panic = "abort"`, that killed the whole process
+/// instead of failing the scrub. The container is now validated before any
+/// third-party parser sees it.
+#[test]
+fn wav_with_impossible_riff_size_fails_closed() {
+    let dir = tmp_dir("wav-riiff-overflow");
+    let mut data = wav_with_list_info();
+    data[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    let src = write_file(&dir, "boom.wav", &data);
+    let before = data.clone();
+
+    let result = scrub_file(
+        &src,
+        None,
+        ScrubOutput::CleanedCopy,
+        false,
+        false,
+        &NullReporter,
+        None,
+    );
+
+    assert!(
+        result.is_err(),
+        "a WAV claiming a {}-byte RIFF body inside a {}-byte file was accepted",
+        u32::MAX,
+        before.len()
+    );
+    assert_eq!(
+        std::fs::read(&src).unwrap(),
+        before,
+        "source was modified by a malformed WAV"
+    );
+    assert!(
+        stray_files(&dir, &src).is_empty(),
+        "a malformed WAV left files behind"
+    );
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// GIF89a with a Comment extension containing the canary.
@@ -374,12 +424,14 @@ fn truncation_sweep_never_corrupts_source() {
                 &full[..offset],
                 "{name}: source changed at truncation offset {offset}"
             );
-            let stray = stray_files(&dir, &src);
-            assert!(stray.is_empty(), "{name}@{offset}: stray output {stray:?}");
             if let Ok(report) = result {
                 // If it *did* succeed on a truncated file, the output must be
                 // a genuine re-parseable container of the same type.
-                let out = dir.join(format!("{name}.clean.{}", report.format.extension()));
+                //
+                // The output path is derived from the *source* name, not from
+                // the detected format: an OOXML package keeps its original
+                // extension, and `MediaFormat::Ooxml::extension()` is empty.
+                let out = dir.join(default_scrub_output_name(&src));
                 assert!(
                     out.exists(),
                     "{name}@{offset}: reported success but wrote no output"
@@ -391,8 +443,12 @@ fn truncation_sweep_never_corrupts_source() {
                     "{name}@{offset}: output is not a valid {:?}",
                     report.format
                 );
+                // Remove the cleaned copy *before* the stray-file check —
+                // otherwise a legitimate output would be reported as a stray.
                 std::fs::remove_file(&out).ok();
             }
+            let stray = stray_files(&dir, &src);
+            assert!(stray.is_empty(), "{name}@{offset}: stray output {stray:?}");
             offset += step;
         }
         std::fs::remove_dir_all(&dir).ok();
@@ -589,6 +645,7 @@ fn successful_scrubs_remove_metadata_and_keep_payload() {
 
 /// Scrubbing a file reached through a symlink must rewrite the target and
 /// leave the link intact — never replace the link with a regular file.
+#[cfg(unix)]
 #[test]
 fn in_place_through_symlink_keeps_the_link() {
     use std::os::unix::fs::symlink;
@@ -624,6 +681,7 @@ fn in_place_through_symlink_keeps_the_link() {
 
 /// A read-only *source* is still readable, so the scrub must succeed and only
 /// touch the destination.
+#[cfg(unix)]
 #[test]
 fn read_only_source_scrubs_to_fresh_destination() {
     use std::os::unix::fs::PermissionsExt;
