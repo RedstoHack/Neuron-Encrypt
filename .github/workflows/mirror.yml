@@ -1,0 +1,33 @@
+name: Mirror GitLab to GitHub
+
+on:
+  schedule:
+    - cron: '0 */3 * * *' # Запуск каждые 3 часа
+  workflow_dispatch: # Возможность ручного запуска из вкладки Actions
+
+permissions:
+  contents: write # Разрешаем создание тегов, коммитов и релизов через встроенный токен
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GitHub repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Используем встроенный GITHUB_TOKEN (по умолчанию)
+          # actions/checkout автоматически настроит credentials для git push
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+
+      - name: Run Sync Script
+        # GITHUB_TOKEN автоматически передается в переменные окружения этого шага
+        run: python sync.py
