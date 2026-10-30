@@ -1,6 +1,7 @@
 <div align="center">
 
-# 🔒 Neuron Encrypt
+# 🔒 Neuron Encrypt NOT OFFICIAL REPOSITORY!!!
+OFFICIAL REPOSITORY: https://gitlab.com/theredhacker0345/neuron-encrypt
 
 **Local file encryption. No accounts. No internet. No compromise.**
 
