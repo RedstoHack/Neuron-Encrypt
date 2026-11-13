@@ -20,6 +20,6 @@ codegen-units = 1
 strip = true
 # Do NOT set panic = "abort" here. The `panic::catch_unwind` wrappers in lib.rs
 # rely on unwinding to convert native panics into Java exceptions instead of
-# crashing the whole Android app. The core neuron-encrypt crate can keep its
-# panic = "abort" because panics there propagate up to the JNI boundary, where
-# catch_unwind catches them.
+# crashing the whole Android app. The core neuron-encrypt crate deliberately
+# keeps panic = "unwind"; enabling abort there would make the JNI
+# catch_unwind wrappers unable to convert panics into Java exceptions.

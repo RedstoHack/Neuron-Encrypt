@@ -33,8 +33,9 @@ fn tag_type_name(tt: TagType) -> &'static str {
 /// that length does not match the file, the container is inconsistent — and
 /// lofty's WAV writer does `size + n` on that field without a checked
 /// addition, so a file claiming `u32::MAX` makes it panic with "attempt to
-/// add with overflow". The release profile is `panic = "abort"`, so that
-/// panic kills the whole process instead of surfacing as an error.
+/// add with overflow". The release profile is `panic = "unwind"` and
+/// `catch_panic` converts the panic into an error, but aborting here keeps the
+/// module fail-closed even if a future caller forgets the wrapper.
 ///
 /// Catching it here keeps the module's fail-closed promise: a structurally
 /// impossible container is rejected, the source is left untouched, and no

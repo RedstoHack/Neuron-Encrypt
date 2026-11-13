@@ -614,8 +614,9 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         // `scrub_image` is a public API and can be called with any format, so
         // the "detect_media_format guarantees II/MM" invariant does not hold
         // for library consumers. Abort with a normal error instead of a
-        // panic — the release profile is `panic = "abort"`, so a panic here
-        // kills the process with no message.
+        // panic — the release profile is `panic = "unwind"` and scrub_file
+        // catches panics, but a normal error keeps the parser fail-closed even
+        // when called directly.
         _ => {
             return Err(CryptoError::MalformedFile(
                 "TIFF has no byte-order mark (expected II or MM)".to_string(),
