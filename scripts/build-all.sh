@@ -32,8 +32,8 @@ check_deps() {
 
 build_linux() {
     log "Building Linux (x86_64-unknown-linux-gnu)..."
-    cargo build --release --locked --all-targets
-    cargo test --release --locked --lib
+    (cd neuron-encrypt && cargo build --release --locked --all-targets)
+    (cd neuron-encrypt && cargo test --release --locked --lib)
     log "Linux build complete"
 }
 
@@ -43,7 +43,7 @@ build_windows() {
         warn "mingw-w64 not installed, skipping Windows build"
         return
     fi
-    cargo build --release --locked --target x86_64-pc-windows-gnu
+    (cd neuron-encrypt && cargo build --release --locked --target x86_64-pc-windows-gnu)
     log "Windows build complete"
 }
 
@@ -53,7 +53,7 @@ build_macos() {
         warn "Not on macOS, skipping native macOS build (use cross-compilation with osxcross)"
         return
     fi
-    cargo build --release --locked --target x86_64-apple-darwin
+    (cd neuron-encrypt && cargo build --release --locked --target x86_64-apple-darwin)
     log "macOS build complete"
 }
 
