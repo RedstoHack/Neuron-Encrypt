@@ -345,6 +345,15 @@ pub fn persist_temp_file(tmp: &Path, dest: &Path) -> CryptoResult<()> {
                 #[allow(clippy::permissions_set_readonly_false)]
                 cleared.set_readonly(false);
                 let _ = fs::set_permissions(dest, cleared);
+
+                // Re-apply the attribute to the replacement so the user's
+                // read-only choice survives the atomic rename.
+                if let Ok(tmp_meta) = fs::symlink_metadata(tmp) {
+                    let mut readonly = tmp_meta.permissions();
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    readonly.set_readonly(true);
+                    let _ = fs::set_permissions(tmp, readonly);
+                }
             }
         }
     }
@@ -2487,4 +2496,27 @@ mod tests {
 
         assert_eq!(decrypted, data);
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn persist_temp_file_preserves_read_only_destination() {
+        let dir = unique_test_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("out.bin");
+        let tmp = dir.join("out.tmp");
+        fs::write(&dest, b"old").unwrap();
+        fs::write(&tmp, b"new").unwrap();
+        let mut perms = fs::metadata(&dest).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&dest, perms).unwrap();
+
+        persist_temp_file(&tmp, &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+        assert!(
+            fs::metadata(&dest).unwrap().permissions().readonly(),
+            "read-only attribute was not restored"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
 }
