@@ -342,7 +342,10 @@ fn remove_xml_elements(
             name_end += 1;
         }
         let raw_name = &xml[name_start..name_end];
-        let local = raw_name.split(|b| *b == b':').next_back().unwrap_or(raw_name);
+        let local = raw_name
+            .split(|b| *b == b':')
+            .next_back()
+            .unwrap_or(raw_name);
 
         // Find the end of the start tag, ignoring '>' inside quoted values.
         let mut scan = name_end;

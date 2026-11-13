@@ -431,10 +431,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
 /// Returns the error to the caller rather than reporting it: the caller owns
 /// the reporting, so a failure is never announced twice (which used to print
 /// the JSON document and the error message a second time).
-fn validate_output_destination(
-    output_path: &Path,
-    force: bool,
-) -> Result<(), (ExitCode, String)> {
+fn validate_output_destination(output_path: &Path, force: bool) -> Result<(), (ExitCode, String)> {
     if !output_path.exists() {
         return Ok(());
     }
@@ -1226,7 +1223,6 @@ fn main() {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1264,5 +1260,4 @@ mod tests {
         let _ = std::fs::remove_file(&existing);
         let _ = std::fs::remove_dir(&dir);
     }
-
 }

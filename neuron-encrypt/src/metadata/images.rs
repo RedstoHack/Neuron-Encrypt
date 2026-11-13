@@ -761,9 +761,8 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         // Inline values are packed into the 4-byte value field. A SHORT entry
         // can hold two strips/tiles (2 x 2 bytes), so the i-th value lives at
         // i * 2, read in the file byte order - not only element 0.
-        let inline_u16 = |e: &TiffEntry, i: usize| -> CryptoResult<u16> {
-            ctx.u16_at(&e.value, i * 2)
-        };
+        let inline_u16 =
+            |e: &TiffEntry, i: usize| -> CryptoResult<u16> { ctx.u16_at(&e.value, i * 2) };
         let inline_val = |e: &TiffEntry, i: usize| -> CryptoResult<u64> {
             if spec.typ_u32 {
                 Ok(ctx.u32_at(&e.value, i * 4)? as u64)
