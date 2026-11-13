@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.neuronencrypt.app.OpenDocumentWithWrite
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -104,7 +105,11 @@ fun SingleFileScreen(
         inputUri = uri
         status = ProcessStatus.Idle
         scope.launch(Dispatchers.IO) {
-            persistUriPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            persistUriPermission(
+                context,
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
             val info = getFileInfo(context, uri)
             val magic = detectMagicBytes(context, uri)
             // Pre-flight the scrub format here: it decides whether the Scrub tab
@@ -137,7 +142,7 @@ fun SingleFileScreen(
     }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        contract = OpenDocumentWithWrite()
     ) { uri ->
         if (uri != null) {
             selectFile(uri)
@@ -805,7 +810,12 @@ fun SingleFileScreen(
                                                     }
                                                 }
                                             } catch (e: Exception) {
-                                                status = ProcessStatus.Error("Delete failed: ${e.message}")
+                                                val hint = if (e is SecurityException) {
+                                                    " The storage provider did not grant write access."
+                                                } else {
+                                                    ""
+                                                }
+                                                status = ProcessStatus.Error("Delete failed: ${e.message}$hint")
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Error)
@@ -912,7 +922,18 @@ fun persistUriPermission(context: Context, uri: Uri, flags: Int) {
     try {
         context.contentResolver.takePersistableUriPermission(uri, flags)
     } catch (_: SecurityException) {
-        // Some providers grant only transient access.
+        // Some providers grant only read even when write was requested. Persist
+        // the read grant so the file stays accessible after a restart.
+        if (flags != Intent.FLAG_GRANT_READ_URI_PERMISSION) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) {
+                // Transient-only provider; nothing persistable to keep.
+            }
+        }
     } catch (_: IllegalArgumentException) {
         // Ignore non-SAF or non-persistable URIs.
     }

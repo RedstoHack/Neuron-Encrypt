@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.neuronencrypt.app.OpenMultipleDocumentsWithWrite
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -90,14 +91,18 @@ fun BatchScreen(onBack: () -> Unit) {
     }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
+        contract = OpenMultipleDocumentsWithWrite()
     ) { uris ->
         if (uris.isNotEmpty()) {
             // Query the provider off the main thread: metadata lookups can be
             // slow on remote providers and would otherwise freeze the UI.
             scope.launch(Dispatchers.IO) {
                 val list = uris.map { uri ->
-                    persistUriPermission(context, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    persistUriPermission(
+                        context,
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
                     val info = getFileInfo(context, uri)
                     BatchItem(uri = uri, name = info.first, size = info.second)
                 }
