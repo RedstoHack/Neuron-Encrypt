@@ -740,6 +740,15 @@ fn scrubs_webp_chunks_and_fixes_riff_size() {
 }
 
 #[test]
+fn webp_chunk_length_overflow_fails_closed() {
+    let mut src = webp_fixture(false);
+    // First chunk starts at offset 12; its size field is at 16..20.
+    src[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+    let err = images::scrub_image(MediaFormat::WebP, &src).unwrap_err();
+    assert!(matches!(err, CryptoError::MalformedFile(_)), "{err:?}");
+}
+
+#[test]
 fn scrubs_gif_blocks_and_keeps_image_data() {
     let src = gif_fixture(true);
     let (out, removed) = images::scrub_image(MediaFormat::Gif, &src).unwrap();

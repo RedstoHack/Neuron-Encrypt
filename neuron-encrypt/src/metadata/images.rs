@@ -267,7 +267,14 @@ fn scrub_webp(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         let kind = &data[pos..pos + 4];
         let len = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]])
             as usize;
-        let end = pos + 8 + len;
+        // `len` is attacker-controlled (u32); use checked arithmetic so a
+        // 32-bit build cannot wrap the end offset past the bounds check.
+        let end = pos
+            .checked_add(8)
+            .and_then(|p| p.checked_add(len))
+            .ok_or_else(|| {
+                CryptoError::MalformedFile("WebP chunk length overflows usize".to_string())
+            })?;
         if end > data.len() {
             return Err(CryptoError::MalformedFile(
                 "WebP chunk overruns file".to_string(),
