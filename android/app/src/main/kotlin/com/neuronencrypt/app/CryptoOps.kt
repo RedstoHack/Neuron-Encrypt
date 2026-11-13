@@ -185,3 +185,23 @@ fun mimeTypeForOutputName(name: String): String {
 private fun zeroByteArray(bytes: ByteArray) {
     java.util.Arrays.fill(bytes, 0)
 }
+
+/**
+ * Remove scratch copies left behind if the process was killed mid-scrub.
+ * The JNI names them `neuron-scrub-<token>.in` / `.out` in cacheDir.
+ */
+fun sweepStaleScrubFiles(context: Context) {
+    try {
+        context.cacheDir.listFiles()?.forEach { file ->
+            if (file.name.startsWith("neuron-scrub-")) {
+                try {
+                    file.delete()
+                } catch (_: Exception) {
+                    // Best effort only.
+                }
+            }
+        }
+    } catch (_: Exception) {
+        // Cache directory unavailable; nothing to clean.
+    }
+}

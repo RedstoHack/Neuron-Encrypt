@@ -27,6 +27,8 @@ class MainActivity : ComponentActivity() {
 
         // Prune stale persisted URI permissions (Android caps at ~128).
         pruneOldUriPermissions()
+        // A crash or force-stop can leave staged plaintext in cacheDir.
+        sweepStaleScrubFiles(this)
 
         // Parse intent on cold start
         sharedUriState.value = handleIntent(intent)
