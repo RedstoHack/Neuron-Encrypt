@@ -6,11 +6,11 @@
 
 AES-256-GCM-SIV · Argon2id · HKDF-SHA512 · 100% Safe Rust
 
-[![Version](https://img.shields.io/badge/version-2.3.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
+[![Version](https://img.shields.io/badge/version-2.4.0-6366f1?style=flat-square)](https://gitlab.com/theredhacker0345/neuron-encrypt/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-f74c00?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-6366f1?style=flat-square)](#download)
-[![Tests](https://img.shields.io/badge/tests-86%20passing-22c55e?style=flat-square)](#contributing)
+[![Tests](https://img.shields.io/badge/tests-94%20passing-22c55e?style=flat-square)](#contributing)
 [![Audit](https://img.shields.io/badge/audit-0%20critical%20%7C%200%20high-22c55e?style=flat-square)](docs/SECURITY_AUDIT.md)
 [![F-Droid](https://img.shields.io/badge/F--Droid-available-22c55e?style=flat-square&logo=f-droid)](https://f-droid.org/packages/com.neuronencrypt.app/)
 
@@ -46,19 +46,23 @@ You have files you don't want anyone to see. Tax returns. Medical records. Sourc
 
 ---
 
-## What's new in 2.3.0
+## What's new in 2.4.0
 
-**Four more scrub formats — 18 in total.** Metadata removal now covers AAC, M4A, Opus, AIFF and 3GP/3G2. Raw AAC was previously misdetected as MP3 and could not be scrubbed at all; 3GP worked but was written out with a `.mp4` extension.
+**A correctness and hardening release.** No format or UI redesign — this release fixes bugs found in a full-codebase review, with a regression test for each.
 
-**Three corruption bugs fixed.** A PNG truncated on a chunk boundary was reported as *successfully scrubbed*, and `scrub --in-place` would replace the original with a header-only stub containing no image data. WebP and GIF had the same flaw. All three now fail closed and leave the source untouched.
+**TIFF scrubber fixes.** Two-strip TIFFs with SHORT offsets were rebuilt with only the first strip relocated, silently corrupting the image (and replacing the original under `--in-place`). Big-endian TIFFs were emitted with a little-endian `42` magic and then rejected by the scrubber's own validator. Orientation and YCbCr decoding tags are now preserved. All fixed, with adjacent/gap/out-of-range/big-endian regression tests.
 
-**Android notification fixed.** An ongoing notification could survive a finished operation and could not be swiped away — it persisted until the app was force-stopped from Settings.
+**CLI and GUI correctness.** `--password-file` no longer asks for an interactive confirmation (so CI no longer hangs), piped decrypt requires `--force` before replacing an existing file, and the GUI no longer discards the save dialog's overwrite confirmation. The desktop GUI also clears egui's passphrase undo history instead of only clearing the `Zeroizing<String>`.
 
-**Also:** the `webbrowser` 1.2.1 advisory ([RUSTSEC-2026-0257](https://rustsec.org/advisories/RUSTSEC-2026-0257)), an in-app list of supported formats, a Linux AppImage, and a CI quality gate that runs `fmt`, `clippy -D warnings`, tests and `cargo audit` on every push.
+**Android.** Magic-byte detection fills the whole 8-byte header instead of trusting one `read`, `WIPE SOURCE` now requests and persists write access, AAC/AIFF/3GP/3G2 output MIME types are mapped, and stale scrub staging files are swept at startup.
 
-Tests: **86/86 pass**, including 14 adversarial tests that truncate every supported container byte-by-byte and assert the source is never modified.
+**Metadata.** OOXML cleanup handles single-quoted and namespace-prefixed `docProps` references and fails closed if a reference survives; PDF deletion failures are no longer ignored.
 
-Full history in [CHANGELOG.md](CHANGELOG.md) · [2.3.0 release notes](docs/releases/RELEASE_NOTES_2.3.0.md)
+**Build/CI.** Rust 1.89 images, release workflow tag trigger/permissions, keystore cleanup, installer fallback 2.4.0, and `build-all.sh` runs cargo from the crate directory.
+
+Tests: **94/94 pass** (92 library + 2 CLI), including new TIFF, WebP, OOXML and CLI regressions.
+
+Full history in [CHANGELOG.md](CHANGELOG.md) · [2.4.0 release notes](docs/releases/RELEASE_NOTES_2.4.0.md)
 
 ---
 
@@ -80,9 +84,9 @@ Prebuilt binaries, no Rust toolchain required:
 
 | Platform | Binary |
 |----------|--------|
-| 🐧 Linux | [`neuron-encrypt-cli-2.3.0-linux-x86_64`](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.3.0/neuron-encrypt-cli-2.3.0-linux-x86_64) |
-| 🪟 Windows | [`neuron-encrypt-cli-2.3.0-windows-x86_64.exe`](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.3.0/neuron-encrypt-cli-2.3.0-windows-x86_64.exe) |
-| 🍎 macOS | [`neuron-encrypt-cli-2.3.0-macos-x86_64`](https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/2.3.0/neuron-encrypt-cli-2.3.0-macos-x86_64) |
+| 🐧 Linux | [`neuron-encrypt-cli-2.4.0-linux-x86_64`](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| 🪟 Windows | [`neuron-encrypt-cli-2.4.0-windows-x86_64.exe`](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
+| 🍎 macOS | [`neuron-encrypt-cli-2.4.0-macos-x86_64`](https://gitlab.com/theredhacker0345/neuron-encrypt/releases/latest) |
 
 **Linux / macOS** — one line, verifies SHA-256 and installs to your PATH:
 
@@ -100,7 +104,7 @@ irm https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1 | iex
 <summary>Manual install (Linux)</summary>
 
 ```bash
-VERSION=2.3.0
+VERSION=2.4.0
 CLI="neuron-encrypt-cli-${VERSION}-linux-x86_64"
 BASE="https://gitlab.com/api/v4/projects/84892701/packages/generic/neuron-encrypt-cli/${VERSION}"
 

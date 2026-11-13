@@ -73,7 +73,7 @@ resolve_version() {
         fi
         # Fallback: hardcoded minimum if Pages file is unavailable
         if [ -z "${VERSION:-}" ]; then
-            VERSION="2.3.0"
+            VERSION="2.4.0"
             warn "Could not fetch latest version — falling back to $VERSION."
         fi
         say "Latest version: $VERSION"

@@ -5,6 +5,39 @@ All notable changes to Neuron Encrypt are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] — 2026-11-13
+
+### Security
+- **The TIFF scrubber could silently corrupt a valid multi-strip image.** A TIFF with two strips and SHORT (type 3) `StripOffsets`/`TileOffsets` packs both offsets into the 4-byte value field. The rebuild loop only considered element 0, so the second strip kept a stale file offset and was not copied; post-write validation only checked the magic, so the corrupt file was accepted — and under `--in-place` it replaced the original. Every inline offset is now read and remapped, with adjacent-strip, gap, out-of-range and big-endian regression tests.
+- **Big-endian TIFFs were written with a little-endian `42` magic.** Every `MM` input produced an `MM 2A 00` header that `detect_media_format` rejected, so all big-endian TIFF scrubs failed post-write validation. The magic is now emitted in the file's byte order.
+- **WebP chunk lengths used unchecked arithmetic.** `pos + 8 + len` with an attacker-controlled `u32` could wrap on 32-bit Android targets and slip a hostile chunk past the bounds check. `checked_add` is now used.
+- **OOXML cleanup could leave dangling `docProps` references.** `remove_xml_elements` only matched unprefixed `<Override>`/`<Relationship>` elements with double-quoted attributes; a package using single quotes or a namespace prefix kept references to removed `docProps` parts while the scrub reported success. Matching is now local-name and quote-style aware, and the scrub fails closed if `[Content_Types].xml` or `_rels/.rels` still mentions `docProps`.
+- **Android `WIPE SOURCE` could never delete.** The picker used the stock read-only contract and persisted only `FLAG_GRANT_READ`, so `DocumentsContract.deleteDocument` failed with `SecurityException` on most providers. The app now uses write-capable document contracts and persists `READ|WRITE` (with a read-only fallback), and reports a clear hint if the provider still denies deletion.
+- **egui retained the passphrase in its undo history.** `TextEdit::password(true)` only masks rendering; `TextEditState` owns an undoer containing plaintext copies. The GUI cleared the `Zeroizing<String>` but called `surrender_focus(Id::NULL)`, which matches no focused widget. The fields now have stable IDs, and their `TextEditState` is removed before an operation and on session teardown.
+
+### Fixed
+- **CLI `--password-file` asked for an interactive confirmation.** The documented CI invocation hung or failed when stdin was closed. The file is now returned directly; added a regression test.
+- **Piped decrypt overwrote an existing output without `--force`.** `run_stream`'s `-i - -o <path>` branch bypassed destination validation. It now validates before consuming stdin.
+- **The GUI discarded the save dialog's overwrite confirmation.** The encrypt path always passed `overwrite=false`, so a user who confirmed replacement got `FileAlreadyExists`. The dialog's consent is now passed through.
+- **Android magic sniffing trusted a single `read`.** Pipes and cloud providers may return fewer than 8 bytes, so a vault could default to Encrypt. The header is now filled or the read fails closed.
+- **`persist_temp_file` lost the Windows read-only attribute.** It cleared the destination's read-only bit for the atomic rename but never restored it. The replacement now keeps the attribute (Windows-only test).
+- **Scrub `-o -` created a file literally named `-`.** `payload_goes_to_stdout` treated scrub as a stdout mode while `run_scrub` wrote a file. Scrub now rejects `-o -`, and piped input reports the correct error before the existence check.
+- **Docker built with Rust 1.88 while the lockfile requires 1.89.** `lofty 0.25.1` declares `rust-version = "1.89"`; the runtime Dockerfile does not copy `rust-toolchain.toml`. All Rust images are now 1.89.
+- **`build-all.sh` ran cargo from a directory with no `Cargo.toml`.** Each cargo invocation now runs in a subshell inside `neuron-encrypt/`.
+- **Installer fallbacks were stale.** Offline installs fell back to 2.2.0; both installers now fall back to 2.3.0 (and this release bumps them to 2.4.0).
+
+### Changed
+- **TIFF whitelist keeps display-critical tags.** Orientation (274), YCbCrCoefficients (529) and ReferenceBlackWhite (532) are no longer dropped; dropping them rotated images or shifted YCbCr colors.
+- **PDF metadata removal propagates failures.** `delete_object` results are checked, and an inline `/Info` dictionary is removed, not just an indirect reference.
+- **Android output MIME map** now covers AAC, AIFF, 3GP, 3G2 and M4V.
+- **Android scrub staging cleanup** sweeps `neuron-scrub-*` files older than one hour at startup, so a crash does not leave staged plaintext behind.
+- **CI:** release workflow runs on `v*` tags with `contents: write` for the release job; the Android keystore is removed after the job and `*.jks`/`*.keystore` are ignored.
+- **Version bump** 2.3.0 → 2.4.0 (core + JNI crates, Android `versionName`), Android `versionCode` 7 → 8.
+
+### Test Results
+- `cargo test --all-targets`: **92 library + 2 CLI = 94/94 pass**.
+- `cargo clippy --all-targets`: clean except one pre-existing `set_readonly(false)` warning in `metadata/tests.rs`.
+- Android/desktop release builds: Windows x86_64, Linux x86_64 and Android APK built from this tree.
 ## [2.3.0] — 2026-10-01
 
 ### Added

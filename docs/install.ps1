@@ -11,7 +11,7 @@
     irm https://theredhacker0345.gitlab.io/neuron-encrypt/install.ps1 | iex
 .EXAMPLE
     # Pin a specific version:
-    $env:NEURON_VERSION = "2.3.0"; irm .../install.ps1 | iex
+    $env:NEURON_VERSION = "2.4.0"; irm .../install.ps1 | iex
 .EXAMPLE
     # Custom install directory:
     $env:NEURON_INSTALL_DIR = "C:\Tools\bin"; irm .../install.ps1 | iex
@@ -55,7 +55,7 @@ function Get-NeuronVersion {
         Write-Warn "Could not fetch latest-version.txt: $_"
     }
     # Hardcoded fallback
-    $fallback = "2.3.0"
+    $fallback = "2.4.0"
     Write-Warn "Falling back to version $fallback."
     return $fallback
 }
