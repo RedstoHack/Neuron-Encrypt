@@ -4,7 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContract
 
 /**
  * ACTION_OPEN_DOCUMENT that requests read *and* write access.
@@ -16,7 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
  * persistUriPermission falls back to read.
  */
 class OpenDocumentWithWrite :
-    ActivityResultContracts.ActivityResultContract<Array<String>, Uri?>() {
+    ActivityResultContract<Array<String>, Uri?>() {
     override fun createIntent(context: Context, input: Array<String>): Intent =
         Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
@@ -33,7 +33,7 @@ class OpenDocumentWithWrite :
 
 /** Multiple-document variant of [OpenDocumentWithWrite]. */
 class OpenMultipleDocumentsWithWrite :
-    ActivityResultContracts.ActivityResultContract<Array<String>, List<Uri>>() {
+    ActivityResultContract<Array<String>, List<Uri>>() {
     override fun createIntent(context: Context, input: Array<String>): Intent =
         Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)

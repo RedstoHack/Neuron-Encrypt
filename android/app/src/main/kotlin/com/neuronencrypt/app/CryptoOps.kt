@@ -1,6 +1,7 @@
 package com.neuronencrypt.app
 
 import android.content.ContentResolver
+import android.content.Context
 import android.net.Uri
 import java.util.concurrent.atomic.AtomicBoolean
 
