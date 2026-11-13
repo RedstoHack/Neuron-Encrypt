@@ -386,6 +386,30 @@ fn preview_output_name(mode: Mode, path: &Path) -> String {
     }
 }
 
+fn password_field_id(primary: bool) -> egui::Id {
+    egui::Id::new(if primary {
+        "neuron_password_field"
+    } else {
+        "neuron_confirm_password_field"
+    })
+}
+
+/// Remove egui's text-edit state for both passphrase fields. `TextEditState`
+/// owns an undoer that stores plaintext copies, so clearing the
+/// `Zeroizing<String>` is not enough.
+fn clear_password_text_state(ctx: &egui::Context) {
+    let focused = ctx.memory(|mem| mem.focused());
+    ctx.memory_mut(|mem| {
+        if let Some(id) = focused {
+            mem.surrender_focus(id);
+        }
+        mem.data
+            .remove::<egui::widgets::text_edit::TextEditState>(password_field_id(true));
+        mem.data
+            .remove::<egui::widgets::text_edit::TextEditState>(password_field_id(false));
+    });
+}
+
 impl NeuronEncryptApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
@@ -450,12 +474,9 @@ impl NeuronEncryptApp {
         self.check_anim = 0.0;
         self.renew_cancel_flag();
 
-        // Clear all GUI state and focus to drop transient internal buffers
-        ctx.memory_mut(|mem| {
-            // In egui 0.28, surrender_focus takes an Id.
-            // Using Id::NULL forces any currently focused widget to lose focus.
-            mem.surrender_focus(egui::Id::NULL);
-        });
+        // Clear all GUI state and focus to drop transient internal buffers,
+        // including egui's undo history for the passphrase fields.
+        clear_password_text_state(ctx);
     }
 
     fn set_selected_file(&mut self, path: PathBuf) {
@@ -556,6 +577,10 @@ impl NeuronEncryptApp {
         let Some(file_path) = self.selected_file.clone() else {
             return;
         };
+
+        // Drop the undo history for the passphrase fields before the operation;
+        // the Zeroizing<String> alone does not cover egui's internal copies.
+        clear_password_text_state(ctx);
 
         if self.mode == Mode::Scrub {
             self.execute_scrub(ctx);
@@ -1437,11 +1462,7 @@ impl NeuronEncryptApp {
 
         let total_width = ui.available_width();
         let (rect, _) = ui.allocate_exact_size(vec2(total_width, 42.0), Sense::hover());
-        let id = if primary {
-            ui.id().with("pw")
-        } else {
-            ui.id().with("cpw")
-        };
+        let id = password_field_id(primary);
         let focus = ui.memory(|memory| memory.has_focus(id));
         let painter = ui.painter_at(rect);
 
@@ -1468,7 +1489,8 @@ impl NeuronEncryptApp {
             } else {
                 egui::TextEdit::singleline(&mut *self.confirm_password).id(id)
             };
-            // Disable history/undo for password fields to avoid memory caching
+            // egui has no "no undo history" switch for TextEdit; execute() and
+            // secure_wipe_session remove TextEditState (including its undoer).
             ui.add(
                 edit.frame(false)
                     .password(!self.show_password)
