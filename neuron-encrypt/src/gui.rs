@@ -601,6 +601,11 @@ impl NeuronEncryptApp {
             dest
         };
 
+        // The native save dialog already asked the user to confirm replacing
+        // an existing file. Pass that consent through instead of rejecting the
+        // destination after the user explicitly chose to overwrite it.
+        let overwrite_existing = self.mode == Mode::Encrypt && dest.exists();
+
         self.dest_path = Some(dest.clone());
         self.progress = 0.0;
         self.prog_frac = 0.0;
@@ -630,7 +635,7 @@ impl NeuronEncryptApp {
                 crypto::encrypt_file(
                     &file_path,
                     &dest,
-                    false,
+                    overwrite_existing,
                     password.as_bytes(),
                     &throttled_reporter,
                     Some(&cancel_for_thread),
