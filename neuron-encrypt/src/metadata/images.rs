@@ -457,7 +457,7 @@ const TYPE_SIZES: [u64; 13] = [0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8];
 
 /// Tags required to keep a TIFF decodable. Anything not listed is treated as
 /// metadata and dropped (privacy-first whitelist).
-const TIFF_KEEP_TAGS: [u16; 27] = [
+const TIFF_KEEP_TAGS: &[u16] = &[
     254, 255, // NewSubfileType, SubfileType
     256, 257, // ImageWidth, ImageLength
     258, // BitsPerSample
@@ -465,6 +465,7 @@ const TIFF_KEEP_TAGS: [u16; 27] = [
     262, // PhotometricInterpretation
     266, // FillOrder
     273, // StripOffsets
+    274, // Orientation (display-critical, not privacy metadata)
     277, 278, 279, // SamplesPerPixel, RowsPerStrip, StripByteCounts
     282, 283, 296, // X/YResolution, ResolutionUnit
     284, // PlanarConfiguration
@@ -473,7 +474,7 @@ const TIFF_KEEP_TAGS: [u16; 27] = [
     322, 323, 324, 325, // TileWidth/Length/Offsets/ByteCounts
     338, 339, // ExtraSamples, SampleFormat
     347, // JPEGTables
-    530, 531, // YCbCrSubSampling, YCbCrPositioning
+    529, 530, 531, 532, // YCbCrCoefficients/SubSampling/Positioning/ReferenceBlackWhite
 ];
 
 fn tiff_tag_category(tag: u16) -> &'static str {
