@@ -46,7 +46,7 @@ cache:
 
 build-android-apk:
   stage: build
-  image: rust:1.88-slim
+  image: rust:1.89-slim
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk-headless unzip wget curl ca-certificates clang lld pkg-config libssl-dev build-essential file git
     - bash .gitlab/ci/setup-android.sh

@@ -1,5 +1,5 @@
 # Dockerfile.builder - Builder image with ALL toolchains for local/CI builds
-FROM rust:1.88-slim AS builder
+FROM rust:1.89-slim AS builder
 
 # Install ALL system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

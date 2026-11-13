@@ -54,7 +54,7 @@ default:
 
 quality:
   stage: check
-  image: rust:1.88-slim
+  image: rust:1.89-slim
   variables:
     CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
   cache:
@@ -79,7 +79,7 @@ quality:
     #
     # The *musl* build specifically: the -gnu build is dynamically linked
     # against glibc 2.39 and dies with "version `GLIBC_2.39' not found" on the
-    # bookworm-based rust:1.88-slim image. The musl build is static and runs
+    # bookworm-based rust:1.89-slim image. The musl build is static and runs
     # anywhere. The tag is resolved from the API so this does not rot, and the
     # binary is executed before being trusted, with `cargo install` as fallback.
     - |

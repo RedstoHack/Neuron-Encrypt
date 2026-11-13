@@ -12,7 +12,7 @@
 #   docker run --rm -v "$PWD/data:/data" neuron-encrypt --help
 # =============================================================================
 
-ARG RUST_IMAGE=rust:1.88-slim
+ARG RUST_IMAGE=rust:1.89-slim
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM ${RUST_IMAGE} AS builder
