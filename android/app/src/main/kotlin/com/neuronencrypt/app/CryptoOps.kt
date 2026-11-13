@@ -192,8 +192,11 @@ private fun zeroByteArray(bytes: ByteArray) {
  */
 fun sweepStaleScrubFiles(context: Context) {
     try {
+        // Only remove files older than an hour: a rotation can recreate the
+        // activity while a scrub is still staging, and those files are live.
+        val cutoff = System.currentTimeMillis() - 60L * 60L * 1000L
         context.cacheDir.listFiles()?.forEach { file ->
-            if (file.name.startsWith("neuron-scrub-")) {
+            if (file.name.startsWith("neuron-scrub-") && file.lastModified() < cutoff) {
                 try {
                     file.delete()
                 } catch (_: Exception) {
