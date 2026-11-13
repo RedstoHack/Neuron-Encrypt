@@ -749,27 +749,31 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             Some(ctx.entry_offset(spec.counts) as usize)
         };
 
-        let inline_val = |e: &TiffEntry| -> CryptoResult<u64> {
+        // Inline values are packed into the 4-byte value field. A SHORT entry
+        // can hold two strips/tiles (2 x 2 bytes), so the i-th value lives at
+        // i * 2, read in the file byte order - not only element 0.
+        let inline_u16 = |e: &TiffEntry, i: usize| -> CryptoResult<u16> {
+            ctx.u16_at(&e.value, i * 2)
+        };
+        let inline_val = |e: &TiffEntry, i: usize| -> CryptoResult<u64> {
             if spec.typ_u32 {
-                Ok(ctx.entry_offset(e) as u64)
+                Ok(ctx.u32_at(&e.value, i * 4)? as u64)
             } else {
-                Ok(u16::from_le_bytes([e.value[0], e.value[1]]) as u64)
+                Ok(inline_u16(e, i)? as u64)
             }
         };
-        let inline_cnt = |e: &TiffEntry| -> CryptoResult<u64> {
-            Ok(u16::from_le_bytes([e.value[0], e.value[1]]) as u64)
+        let inline_cnt = |e: &TiffEntry, i: usize| -> CryptoResult<u64> {
+            Ok(inline_u16(e, i)? as u64)
         };
 
         for i in 0..n {
             let off = match offs_arr {
                 Some(a) => read_one(a, i)?,
-                None if i == 0 => inline_val(spec.offsets)?,
-                None => continue,
+                None => inline_val(spec.offsets, i)?,
             };
             let len = match cnts_arr {
                 Some(a) => read_one(a, i)?,
-                None if i == 0 => inline_cnt(spec.counts)?,
-                None => continue,
+                None => inline_cnt(spec.counts, i)?,
             };
             if off == 0 || len == 0 {
                 continue;
@@ -878,30 +882,35 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             if total <= 4 {
                 let mut v = e.value;
                 if (e.tag == 273 || e.tag == 324) && total > 0 {
-                    // Inline single offset — remap through the data map.
-                    let old = if e.typ == 4 {
-                        ctx.entry_offset(e) as usize
-                    } else {
-                        ctx.u16_at(&e.value, 0)? as usize
-                    };
-                    if old != 0 {
-                        let new = translate_data(old)?;
-                        v = if e.typ == 4 {
-                            if le {
-                                (new as u32).to_le_bytes()
-                            } else {
-                                (new as u32).to_be_bytes()
-                            }
+                    // Inline offsets: a SHORT entry packs two strips/tiles into
+                    // the 4-byte value field. Remap every value, not just the
+                    // first - otherwise the second strip keeps a stale file
+                    // offset and the rebuilt image is silently corrupt.
+                    let count = (total / unit) as usize;
+                    for i in 0..count {
+                        let old = if e.typ == 4 {
+                            ctx.u32_at(&e.value, i * 4)? as usize
                         } else {
-                            let mut b = [0u8; 4];
-                            let pair = if le {
-                                (new as u16).to_le_bytes()
-                            } else {
-                                (new as u16).to_be_bytes()
-                            };
-                            b[..2].copy_from_slice(&pair);
-                            b
+                            ctx.u16_at(&e.value, i * 2)? as usize
                         };
+                        if old != 0 {
+                            let new = translate_data(old)?;
+                            if e.typ == 4 {
+                                let pair = if le {
+                                    (new as u32).to_le_bytes()
+                                } else {
+                                    (new as u32).to_be_bytes()
+                                };
+                                v[i * 4..i * 4 + 4].copy_from_slice(&pair);
+                            } else {
+                                let pair = if le {
+                                    (new as u16).to_le_bytes()
+                                } else {
+                                    (new as u16).to_be_bytes()
+                                };
+                                v[i * 2..i * 2 + 2].copy_from_slice(&pair);
+                            }
+                        }
                     }
                 }
                 scratch.extend_from_slice(&v);

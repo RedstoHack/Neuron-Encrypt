@@ -290,6 +290,63 @@ fn tiff_fixture() -> Vec<u8> {
     out
 }
 
+/// Two-strip TIFF whose SHORT offsets/counts are packed inline (type 3, count 2).
+fn tiff_two_strip_short_offsets() -> Vec<u8> {
+    const W: u16 = 4;
+    const H: u16 = 2;
+    let n_entries = 10usize;
+    let header_len = 8usize;
+    let ifd_len = 2 + n_entries * 12 + 4;
+    let data_off = header_len + ifd_len;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"II*\0");
+    out.extend_from_slice(&(header_len as u32).to_le_bytes());
+    out.extend_from_slice(&(n_entries as u16).to_le_bytes());
+
+    let entry = |out: &mut Vec<u8>, tag: u16, typ: u16, count: u32, value: [u8; 4]| {
+        out.extend_from_slice(&tag.to_le_bytes());
+        out.extend_from_slice(&typ.to_le_bytes());
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&value);
+    };
+    let short_val = |v: u16| -> [u8; 4] {
+        let mut b = [0u8; 4];
+        b[..2].copy_from_slice(&v.to_le_bytes());
+        b
+    };
+    let two_shorts = |a: u16, b: u16| -> [u8; 4] {
+        let mut v = [0u8; 4];
+        v[..2].copy_from_slice(&a.to_le_bytes());
+        v[2..].copy_from_slice(&b.to_le_bytes());
+        v
+    };
+
+    entry(&mut out, 256, 3, 1, short_val(W)); // ImageWidth
+    entry(&mut out, 257, 3, 1, short_val(H)); // ImageLength
+    entry(&mut out, 258, 3, 1, short_val(8)); // BitsPerSample
+    entry(&mut out, 259, 3, 1, short_val(1)); // Compression = none
+    entry(&mut out, 262, 3, 1, short_val(1)); // Photometric = BlackIsZero
+    entry(
+        &mut out,
+        273,
+        3,
+        2,
+        two_shorts(data_off as u16, (data_off + 4) as u16),
+    ); // StripOffsets: two SHORTs inline
+    entry(&mut out, 277, 3, 1, short_val(1)); // SamplesPerPixel
+    entry(&mut out, 278, 3, 1, short_val(1)); // RowsPerStrip
+    entry(&mut out, 279, 3, 2, two_shorts(4, 4)); // StripByteCounts
+    entry(&mut out, 284, 3, 1, short_val(1)); // PlanarConfiguration
+
+    out.extend_from_slice(&0u32.to_le_bytes()); // next IFD
+    assert_eq!(out.len(), data_off);
+    for i in 0..8u8 {
+        out.push(0xA0 + i); // two 4-byte strips
+    }
+    out
+}
+
 fn wav_fixture() -> Vec<u8> {
     let fmt: [u8; 16] = [
         1, 0, 1, 0, 0x40, 0x1F, 0x00, 0x00, 0x40, 0x1F, 0x00, 0x00, 1, 0, 8, 0,
@@ -649,6 +706,51 @@ fn tiff_rebuild_preserves_pixels_and_drops_metadata() {
     let (out2, removed2) = images::scrub_image(MediaFormat::Tiff, &out).unwrap();
     assert!(removed2.is_empty(), "{removed2:?}");
     assert_eq!(parse_tiff_entries(&out2).len(), entries.len());
+}
+
+#[test]
+fn tiff_two_strip_short_offsets_are_both_relocated() {
+    let src = tiff_two_strip_short_offsets();
+    let (out, _removed) = images::scrub_image(MediaFormat::Tiff, &src).unwrap();
+
+    let entries = parse_tiff_entries(&out);
+    let strip = entries.iter().find(|e| e.0 == 273).unwrap();
+    assert_eq!(strip.2, 2, "strip count changed");
+    assert_eq!(strip.3.len(), 4, "two SHORT offsets must stay inline");
+
+    let off0 = u16::from_le_bytes([strip.3[0], strip.3[1]]) as usize;
+    let off1 = u16::from_le_bytes([strip.3[2], strip.3[3]]) as usize;
+    assert!(off1 > off0, "second offset was not relocated");
+
+    let original = &src[134..142];
+    assert_eq!(&out[off0..off0 + 4], &original[0..4], "first strip corrupted");
+    assert_eq!(&out[off1..off1 + 4], &original[4..8], "second strip corrupted");
+    assert_eq!(detect_media_format(&out), Some(MediaFormat::Tiff));
+}
+
+#[test]
+fn tiff_two_strip_short_offsets_with_gap_are_both_relocated() {
+    let mut src = tiff_two_strip_short_offsets();
+    // Insert a gap between the strips, then point the second offset at the
+    // shifted location (inline value at IFD entry 5, bytes 2..4 of the field).
+    src.splice(138..138, [0xEE; 4]);
+    src[80..82].copy_from_slice(&142u16.to_le_bytes());
+
+    let (out, _removed) = images::scrub_image(MediaFormat::Tiff, &src).unwrap();
+    let entries = parse_tiff_entries(&out);
+    let strip = entries.iter().find(|e| e.0 == 273).unwrap();
+    let off0 = u16::from_le_bytes([strip.3[0], strip.3[1]]) as usize;
+    let off1 = u16::from_le_bytes([strip.3[2], strip.3[3]]) as usize;
+    assert_eq!(&out[off0..off0 + 4], &src[134..138], "first strip corrupted");
+    assert_eq!(&out[off1..off1 + 4], &src[142..146], "second strip corrupted");
+}
+
+#[test]
+fn tiff_two_strip_short_offsets_out_of_range_fails_closed() {
+    let mut src = tiff_two_strip_short_offsets();
+    src[80..82].copy_from_slice(&0xFFFFu16.to_le_bytes());
+    let err = images::scrub_image(MediaFormat::Tiff, &src).unwrap_err();
+    assert!(matches!(err, CryptoError::MalformedFile(_)), "{err:?}");
 }
 
 #[test]
