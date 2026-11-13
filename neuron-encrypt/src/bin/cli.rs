@@ -239,6 +239,11 @@ fn read_password_confirmed(
     password_file: &Option<PathBuf>,
 ) -> Result<Zeroizing<Vec<u8>>, (ExitCode, String)> {
     let pass1 = read_password(password_file)?;
+    // A password file (or NEURON_PASSWORD) is the source of truth. Asking for
+    // a second interactive copy would hang CI and contradicts --password-file.
+    if password_file.is_some() {
+        return Ok(pass1);
+    }
     let pass2 = loop {
         match rpassword::prompt_password("Confirm passphrase: ") {
             Ok(pw) => {
@@ -1185,5 +1190,30 @@ fn main() {
     match run() {
         Ok(()) => std::process::exit(ExitCode::Success as i32),
         Err(code) => std::process::exit(code as i32),
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn password_file_skips_interactive_confirmation() {
+        let dir = std::env::temp_dir().join(format!("neuron-pwfile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("key.txt");
+        std::fs::write(&path, b"correct horse battery staple\n").unwrap();
+
+        // Must return the file contents without touching stdin: the whole point
+        // of --password-file is non-interactive use.
+        let pw = match read_password_confirmed(&Some(path.clone())) {
+            Ok(pw) => pw,
+            Err((_, msg)) => panic!("password file rejected: {msg}"),
+        };
+        assert_eq!(pw.as_slice(), b"correct horse battery staple");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
     }
 }
