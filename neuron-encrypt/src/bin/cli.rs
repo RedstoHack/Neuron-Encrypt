@@ -430,15 +430,13 @@ fn same_path(a: &Path, b: &Path) -> bool {
 /// Returns the error to the caller rather than reporting it: the caller owns
 /// the reporting, so a failure is never announced twice (which used to print
 /// the JSON document and the error message a second time).
-fn validate_output_path(
-    input_path: &Path,
+fn validate_output_destination(
     output_path: &Path,
     force: bool,
 ) -> Result<(), (ExitCode, String)> {
     if !output_path.exists() {
         return Ok(());
     }
-
     if !force {
         return Err((
             ExitCode::BadInput,
@@ -448,6 +446,15 @@ fn validate_output_path(
             ),
         ));
     }
+    Ok(())
+}
+
+fn validate_output_path(
+    input_path: &Path,
+    output_path: &Path,
+    force: bool,
+) -> Result<(), (ExitCode, String)> {
+    validate_output_destination(output_path, force)?;
 
     let input = fs::canonicalize(input_path).map_err(|e| {
         (
@@ -815,6 +822,18 @@ fn run_stream(
             crypto::encrypt_stream(&mut f, &mut stdout_lock, password, source_size, &throttled)
         }
     } else {
+        // Validate the destination before consuming stdin: an existing output
+        // must require --force, exactly like the file-input path.
+        if !is_pipe_out {
+            if let Some(path) = output_str.as_deref() {
+                if let Err((code, msg)) = validate_output_destination(Path::new(path), cli.force) {
+                    emit_error_json(json_mode(cli), &start, Some(path.to_owned()), &msg);
+                    eprintln!("Error: {msg}");
+                    return Err(code);
+                }
+            }
+        }
+
         let mut reader: Box<dyn ReadSeek> = if is_pipe_in {
             let mut tmp = tempfile::tempfile().map_err(|e| {
                 let msg = format!("Cannot create temporary file: {e}");
@@ -1216,4 +1235,20 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
     }
+
+    #[test]
+    fn output_destination_requires_force_for_existing_file() {
+        let dir = std::env::temp_dir().join(format!("neuron-out-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let existing = dir.join("out.bin");
+        std::fs::write(&existing, b"old").unwrap();
+
+        assert!(validate_output_destination(&existing, false).is_err());
+        assert!(validate_output_destination(&existing, true).is_ok());
+        assert!(validate_output_destination(&dir.join("missing.bin"), false).is_ok());
+
+        let _ = std::fs::remove_file(&existing);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
 }
