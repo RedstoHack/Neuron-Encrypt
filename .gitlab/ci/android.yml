@@ -81,6 +81,10 @@ build-android-apk:
     - echo "Assembling release APK (standard flavor — signed)..."
     - ./gradlew :app:assembleStandardRelease --no-daemon
     - ls -la app/build/outputs/apk/standard/release/ || true
+  after_script:
+    # The release keystore is materialised in CI_PROJECT_DIR; never leave it
+    # behind on a shared runner or let a later job pick it up.
+    - rm -f "$CI_PROJECT_DIR/upload-keystore.jks"
   artifacts:
     paths:
       - android/app/build/outputs/apk/fdroid/release/app-fdroid-release-unsigned.apk

@@ -3,6 +3,7 @@ name: Build Artifacts
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
 
@@ -197,6 +198,8 @@ jobs:
   generate-sha256:
     name: Generate SHA-256 Hashes
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs: [build, build-installer]
     if: always() && (needs.build.result == 'success' || needs.build-installer.result == 'success')
     steps:

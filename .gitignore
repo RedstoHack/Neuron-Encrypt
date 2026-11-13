@@ -28,5 +28,7 @@ offline-gmaven-stable.zip
 # be made to accept forged certificates for every HTTPS endpoint.
 *.pem
 *.crt
+*.jks
+*.keystore
 !android/app/src/main/res/**/*.xml
 
