@@ -124,7 +124,7 @@ cd neuron-encrypt/neuron-encrypt
 cargo build --release --locked --bin neuron-encrypt --bin neuron-encrypt-cli
 ```
 
-`-p neuron-encrypt-cli` selects just the CLI; the repository root is a workspace containing both binaries.
+`--bin neuron-encrypt-cli` selects just the CLI. The crate has two binaries, `neuron-encrypt` (GUI) and `neuron-encrypt-cli`; the repository root is not a Cargo workspace (the crate lives in `neuron-encrypt/`).
 
 </details>
 
