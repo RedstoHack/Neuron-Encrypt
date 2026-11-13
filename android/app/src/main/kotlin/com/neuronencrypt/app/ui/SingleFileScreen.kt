@@ -936,8 +936,15 @@ fun detectMagicBytes(context: Context, uri: Uri): String? {
     try {
         context.contentResolver.openInputStream(uri)?.use { stream ->
             val magic = ByteArray(8)
-            val n = stream.read(magic)
-            if (n == 8) {
+            // InputStream.read(byte[]) may return fewer bytes than requested
+            // (pipes, cloud providers). Fill the whole header or fail closed.
+            var offset = 0
+            while (offset < magic.size) {
+                val n = stream.read(magic, offset, magic.size - offset)
+                if (n <= 0) break
+                offset += n
+            }
+            if (offset == magic.size) {
                 if (magic.contentEquals("VAULTX02".toByteArray())) return "VAULTX02"
                 if (magic.contentEquals("VAULTX03".toByteArray())) return "VAULTX03"
                 if (magic.contentEquals("VAULTX04".toByteArray())) return "VAULTX04"
