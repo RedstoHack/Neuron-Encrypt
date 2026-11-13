@@ -347,6 +347,63 @@ fn tiff_two_strip_short_offsets() -> Vec<u8> {
     out
 }
 
+/// Big-endian (MM) two-strip TIFF with inline SHORT offsets and counts.
+fn tiff_be_two_strip() -> Vec<u8> {
+    const W: u16 = 4;
+    const H: u16 = 2;
+    let n_entries = 10usize;
+    let header_len = 8usize;
+    let ifd_len = 2 + n_entries * 12 + 4;
+    let data_off = header_len + ifd_len;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"MM\0*");
+    out.extend_from_slice(&(header_len as u32).to_be_bytes());
+    out.extend_from_slice(&(n_entries as u16).to_be_bytes());
+
+    let entry = |out: &mut Vec<u8>, tag: u16, typ: u16, count: u32, value: [u8; 4]| {
+        out.extend_from_slice(&tag.to_be_bytes());
+        out.extend_from_slice(&typ.to_be_bytes());
+        out.extend_from_slice(&count.to_be_bytes());
+        out.extend_from_slice(&value);
+    };
+    let short_val = |v: u16| -> [u8; 4] {
+        let mut b = [0u8; 4];
+        b[..2].copy_from_slice(&v.to_be_bytes());
+        b
+    };
+    let two_shorts = |a: u16, b: u16| -> [u8; 4] {
+        let mut v = [0u8; 4];
+        v[..2].copy_from_slice(&a.to_be_bytes());
+        v[2..].copy_from_slice(&b.to_be_bytes());
+        v
+    };
+
+    entry(&mut out, 256, 3, 1, short_val(W)); // ImageWidth
+    entry(&mut out, 257, 3, 1, short_val(H)); // ImageLength
+    entry(&mut out, 258, 3, 1, short_val(8)); // BitsPerSample
+    entry(&mut out, 259, 3, 1, short_val(1)); // Compression = none
+    entry(&mut out, 262, 3, 1, short_val(1)); // Photometric = BlackIsZero
+    entry(
+        &mut out,
+        273,
+        3,
+        2,
+        two_shorts(data_off as u16, (data_off + 4) as u16),
+    ); // StripOffsets: two SHORTs inline
+    entry(&mut out, 277, 3, 1, short_val(1)); // SamplesPerPixel
+    entry(&mut out, 278, 3, 1, short_val(1)); // RowsPerStrip
+    entry(&mut out, 279, 3, 2, two_shorts(4, 4)); // StripByteCounts
+    entry(&mut out, 284, 3, 1, short_val(1)); // PlanarConfiguration
+
+    out.extend_from_slice(&0u32.to_be_bytes()); // next IFD
+    assert_eq!(out.len(), data_off);
+    for i in 0..8u8 {
+        out.push(0xA0 + i);
+    }
+    out
+}
+
 fn wav_fixture() -> Vec<u8> {
     let fmt: [u8; 16] = [
         1, 0, 1, 0, 0x40, 0x1F, 0x00, 0x00, 0x40, 0x1F, 0x00, 0x00, 1, 0, 8, 0,
@@ -751,6 +808,34 @@ fn tiff_two_strip_short_offsets_out_of_range_fails_closed() {
     src[80..82].copy_from_slice(&0xFFFFu16.to_le_bytes());
     let err = images::scrub_image(MediaFormat::Tiff, &src).unwrap_err();
     assert!(matches!(err, CryptoError::MalformedFile(_)), "{err:?}");
+}
+
+#[test]
+fn tiff_big_endian_header_and_inline_offsets_roundtrip() {
+    let src = tiff_be_two_strip();
+    let (out, _removed) = images::scrub_image(MediaFormat::Tiff, &src).unwrap();
+
+    assert_eq!(&out[0..4], b"MM\0*", "big-endian magic was written little-endian");
+    assert_eq!(detect_media_format(&out), Some(MediaFormat::Tiff));
+
+    let rd16 = |o: usize| u16::from_be_bytes([out[o], out[o + 1]]);
+    let rd32 = |o: usize| u32::from_be_bytes([out[o], out[o + 1], out[o + 2], out[o + 3]]);
+    let ifd = rd32(4) as usize;
+    let count = rd16(ifd) as usize;
+    let mut strip_base = None;
+    for i in 0..count {
+        let base = ifd + 2 + i * 12;
+        if rd16(base) == 273 {
+            strip_base = Some(base);
+        }
+    }
+    let base = strip_base.expect("StripOffsets survived");
+    assert_eq!(rd16(base + 2), 3, "offset type changed");
+    assert_eq!(rd32(base + 4), 2, "strip count changed");
+    let off0 = rd16(base + 8) as usize;
+    let off1 = rd16(base + 10) as usize;
+    assert_eq!(&out[off0..off0 + 4], &src[134..138], "first strip corrupted");
+    assert_eq!(&out[off1..off1 + 4], &src[138..142], "second strip corrupted");
 }
 
 #[test]

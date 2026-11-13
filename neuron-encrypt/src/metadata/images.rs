@@ -857,8 +857,9 @@ fn scrub_tiff(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     // ---- Serialize ----------------------------------------------------------
     let mut out = vec![0u8; cursor_new];
     out[..2].copy_from_slice(if le { b"II" } else { b"MM" });
-    out[2] = b'*';
-    out[3] = 0;
+    // The 42 magic is part of the byte-order contract: little-endian files
+    // store `2A 00`, big-endian files store `00 2A`.
+    out[2..4].copy_from_slice(if le { b"*\0" } else { b"\0*" });
     ctx.set_u32(&mut out, 4, table_positions[0] as u32);
 
     for (pi, page) in kept_pages.iter().enumerate() {
