@@ -174,7 +174,8 @@ fn payload_goes_to_stdout(cli: &Cli) -> bool {
         Some(Command::Encrypt { output, .. }) | Some(Command::Decrypt { output, .. }) => {
             output.as_deref() == Some("-")
         }
-        Some(Command::Scrub { output, .. }) => output.as_deref() == Some("-"),
+        // Scrub has no stdout mode; run_scrub rejects "-" explicitly.
+        Some(Command::Scrub { .. }) => false,
         None => false,
     }
 }
@@ -986,16 +987,29 @@ fn run_scrub(
     in_place: bool,
     wipe_original: bool,
 ) -> Result<(), ExitCode> {
+    // Reject piped input before the existence check: "-" is not a file, so
+    // the old order reported "Input file not found: -" instead of the real
+    // reason (scrubbing requires a seekable file).
+    if input_str == "-" {
+        let msg = "Metadata scrubbing requires a seekable file; piped input is not supported.";
+        emit_error_json(json_mode(cli), &start, None, msg);
+        eprintln!("Error: {msg}");
+        return Err(ExitCode::BadInput);
+    }
+
+    // Scrub writes a binary file; it has no stdout mode. Reject "-" explicitly
+    // instead of silently creating a file literally named "-".
+    if output_str.as_deref() == Some("-") {
+        let msg = "Metadata scrubbing writes a file; stdout output is not supported. Omit -o to write beside the input.";
+        emit_error_json(json_mode(cli), &start, None, msg);
+        eprintln!("Error: {msg}");
+        return Err(ExitCode::BadInput);
+    }
+
     let input_path = PathBuf::from(input_str);
     if !input_path.exists() {
         let msg = format!("Input file not found: {}", input_path.display());
         emit_error_json(json_mode(cli), &start, None, &msg);
-        eprintln!("Error: {msg}");
-        return Err(ExitCode::BadInput);
-    }
-    if input_str == "-" {
-        let msg = "Metadata scrubbing requires a seekable file; piped input is not supported.";
-        emit_error_json(json_mode(cli), &start, None, msg);
         eprintln!("Error: {msg}");
         return Err(ExitCode::BadInput);
     }
