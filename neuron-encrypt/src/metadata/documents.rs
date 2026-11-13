@@ -40,6 +40,7 @@ fn scrub_pdf(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     let mut removed = Vec::new();
 
     // 1. Trailer /Info dictionary — authorship and dates.
+    let has_info = doc.trailer.get(b"Info").is_ok();
     let info_id = doc
         .trailer
         .get(b"Info")
@@ -56,7 +57,11 @@ fn scrub_pdf(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
                 removed.push("Document info (title/author/dates/producer)".to_string());
             }
         }
-        let _ = doc.delete_object(id);
+        if doc.delete_object(id).is_none() {
+            return Err(CryptoError::ScrubFailed("PDF Info object not found".to_string()));
+        }
+    }
+    if has_info {
         let _ = doc.trailer.remove(b"Info");
     }
 
@@ -77,7 +82,9 @@ fn scrub_pdf(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
             // delete_object strips every reference to meta_id across the
             // document graph (including the catalog entry) and drops the
             // object itself.
-            let _ = doc.delete_object(meta_id);
+            if doc.delete_object(meta_id).is_none() {
+                return Err(CryptoError::ScrubFailed("PDF XMP object not found".to_string()));
+            }
             removed.push("XMP metadata stream".to_string());
         }
     }
@@ -153,6 +160,10 @@ fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
     let buf = std::io::Cursor::new(Vec::with_capacity(data.len() + 4096));
     let mut writer = ZipWriter::new(buf);
     let mut removed: Vec<String> = Vec::new();
+    // If any docProps part is dropped, the two index parts must be patched
+    // so the package does not keep dangling references (single-quoted or
+    // namespaced attributes included).
+    let has_dropped_part = archive.file_names().any(is_dropped_part);
 
     for i in 0..archive.len() {
         let mut file = archive
@@ -189,14 +200,22 @@ fn scrub_ooxml(data: &[u8]) -> CryptoResult<(Vec<u8>, Vec<String>)> {
         }
 
         let patched = match name.as_str() {
-            "[Content_Types].xml" => remove_xml_elements(&bytes, b"<Override", &|elem| {
+            "[Content_Types].xml" => remove_xml_elements(&bytes, b"Override", &|elem| {
                 find_attr(elem, b"PartName").starts_with(b"/docProps")
             }),
-            "_rels/.rels" => remove_xml_elements(&bytes, b"<Relationship", &|elem| {
+            "_rels/.rels" => remove_xml_elements(&bytes, b"Relationship", &|elem| {
                 find_attr(elem, b"Target").starts_with(b"docProps")
             }),
             _ => None,
         };
+        if has_dropped_part
+            && matches!(name.as_str(), "[Content_Types].xml" | "_rels/.rels")
+            && find_subslice(patched.as_deref().unwrap_or(&bytes), b"docProps").is_some()
+        {
+            return Err(CryptoError::ScrubFailed(format!(
+                "OOXML index '{name}' still references a removed docProps part"
+            )));
+        }
         let bytes = patched.unwrap_or(bytes);
 
         if file.is_dir() {
@@ -256,11 +275,12 @@ fn category_for_part(name: &str) -> String {
     }
 }
 
-/// Remove `<prefix .../>` elements whose content satisfies `matches`.
-/// Returns `None` when nothing matched (input returned unchanged).
+/// Remove self-closing elements whose *local* tag name equals local_name
+/// (namespace prefixes such as ct:Override are accepted) and whose content
+/// satisfies matches. Returns None when nothing matched.
 fn remove_xml_elements(
     xml: &[u8],
-    prefix: &[u8],
+    local_name: &[u8],
     matches: &dyn Fn(&[u8]) -> bool,
 ) -> Option<Vec<u8>> {
     let mut out: Vec<u8> = Vec::with_capacity(xml.len());
@@ -268,54 +288,123 @@ fn remove_xml_elements(
     let mut pos = 0usize;
 
     while pos < xml.len() {
-        match find_subslice(&xml[pos..], prefix) {
-            Some(rel) => {
-                let start = pos + rel;
-                out.extend_from_slice(&xml[pos..start]);
-                let end_rel = find_subslice(&xml[start..], b"/>").map(|r| r + 2);
-                let elem_end = match end_rel {
-                    Some(end) => start + end,
-                    None => {
-                        // Malformed fragment — copy rest verbatim.
-                        out.extend_from_slice(&xml[start..]);
-                        return if changed { Some(out) } else { None };
-                    }
-                };
-                let element = &xml[start..elem_end];
-                if matches(element) {
-                    changed = true;
-                } else {
-                    out.extend_from_slice(element);
-                }
-                pos = elem_end;
-            }
-            None => {
+        let Some(rel) = find_subslice(&xml[pos..], b"<") else {
+            out.extend_from_slice(&xml[pos..]);
+            break;
+        };
+        let start = pos + rel;
+        let after = start + 1;
+        if after >= xml.len() {
+            out.extend_from_slice(&xml[pos..]);
+            break;
+        }
+        // Copy comments, processing instructions and close tags verbatim.
+        if xml[after] == b'!' {
+            if let Some(rel_end) = find_subslice(&xml[after..], b"-->") {
+                let end = after + rel_end + 3;
+                out.extend_from_slice(&xml[pos..end]);
+                pos = end;
+            } else {
                 out.extend_from_slice(&xml[pos..]);
                 break;
             }
+            continue;
         }
+        if xml[after] == b'?' {
+            if let Some(rel_end) = find_subslice(&xml[after..], b"?>") {
+                let end = after + rel_end + 2;
+                out.extend_from_slice(&xml[pos..end]);
+                pos = end;
+            } else {
+                out.extend_from_slice(&xml[pos..]);
+                break;
+            }
+            continue;
+        }
+        if xml[after] == b'/' {
+            if let Some(rel_end) = find_subslice(&xml[after..], b">") {
+                let end = after + rel_end + 1;
+                out.extend_from_slice(&xml[pos..end]);
+                pos = end;
+            } else {
+                out.extend_from_slice(&xml[pos..]);
+                break;
+            }
+            continue;
+        }
+
+        // Tag name up to whitespace, '/', or '>'.
+        let name_start = after;
+        let mut name_end = name_start;
+        while name_end < xml.len()
+            && !matches!(xml[name_end], b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>')
+        {
+            name_end += 1;
+        }
+        let raw_name = &xml[name_start..name_end];
+        let local = raw_name.split(|b| *b == b':').next_back().unwrap_or(raw_name);
+
+        // Find the end of the start tag, ignoring '>' inside quoted values.
+        let mut scan = name_end;
+        let mut quote: Option<u8> = None;
+        let mut tag_end = None;
+        while scan < xml.len() {
+            let b = xml[scan];
+            match quote {
+                Some(q) => {
+                    if b == q {
+                        quote = None;
+                    }
+                }
+                None => {
+                    if b == b'"' || b == b'\'' {
+                        quote = Some(b);
+                    } else if b == b'>' {
+                        tag_end = Some(scan);
+                        break;
+                    }
+                }
+            }
+            scan += 1;
+        }
+        let Some(tag_end) = tag_end else {
+            out.extend_from_slice(&xml[pos..]);
+            return if changed { Some(out) } else { None };
+        };
+
+        let element = &xml[start..=tag_end];
+        let self_closing = xml[start..tag_end]
+            .iter()
+            .rev()
+            .find(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
+            .map(|b| *b == b'/')
+            .unwrap_or(false);
+
+        if local == local_name && self_closing && matches(element) {
+            changed = true;
+        } else {
+            out.extend_from_slice(&xml[pos..=tag_end]);
+        }
+        pos = tag_end + 1;
     }
 
-    if changed {
-        Some(out)
-    } else {
-        None
-    }
+    if changed { Some(out) } else { None }
 }
 
+/// Return the value of attr in element, accepting either quote style.
 fn find_attr(element: &[u8], attr: &[u8]) -> Vec<u8> {
-    let needle: Vec<u8> = [attr, "=\"".as_bytes()].concat();
-    match find_subslice(element, &needle) {
-        Some(start) => {
+    for quote in [b'"', b'\''] {
+        let needle: Vec<u8> = [attr, b"=", &[quote]].concat();
+        if let Some(start) = find_subslice(element, &needle) {
             let vstart = start + needle.len();
-            let vend = find_subslice(&element[vstart..], b"\"")
-                .map(|r| vstart + r)
-                .unwrap_or(vstart);
-            element[vstart..vend].to_vec()
+            if let Some(rel) = find_subslice(&element[vstart..], &[quote]) {
+                return element[vstart..vstart + rel].to_vec();
+            }
         }
-        None => Vec::new(),
     }
+    Vec::new()
 }
+
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
@@ -327,4 +416,33 @@ fn dedup(items: Vec<String>) -> Vec<String> {
         .into_iter()
         .filter(|i| seen.insert(i.clone()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_attr_accepts_both_quote_styles() {
+        assert_eq!(
+            find_attr(br#"<Override PartName="/docProps/core.xml"/>"#, b"PartName"),
+            b"/docProps/core.xml".to_vec()
+        );
+        assert_eq!(
+            find_attr(b"<Override PartName='/docProps/core.xml'/>", b"PartName"),
+            b"/docProps/core.xml".to_vec()
+        );
+        assert!(find_attr(b"<Override/>", b"PartName").is_empty());
+    }
+
+    #[test]
+    fn remove_xml_elements_matches_prefixed_local_name() {
+        let xml = br#"<Types><Override PartName="/docProps/core.xml"/><ct:Override PartName="/docProps/app.xml"/><Default Extension="xml"/></Types>"#;
+        let out = remove_xml_elements(xml, b"Override", &|e| {
+            find_attr(e, b"PartName").starts_with(b"/docProps")
+        })
+        .expect("elements should be removed");
+        assert!(!out.windows(8).any(|w| w == b"docProps".as_slice()));
+        assert!(out.windows(7).any(|w| w == b"Default".as_slice()));
+    }
 }
