@@ -1,0 +1,43 @@
+name: Android Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Позволяет запускать сборку вручную кнопкой в интерфейсе GitHub
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive # Если используются подмодули
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu' # Можно изменить на 'temurin'
+        java-version: '21'   # Согласно коммиту "Java 21 compatibility" на вашем скриншоте
+
+    # Так как в проекте есть Rust, даем права на исполнение скрипта и запускаем его при необходимости
+    - name: Make Rust build script executable
+      run: chmod +x android/build-rust.sh
+
+    # Настройка прав для Gradle wrapper
+    - name: Make Gradle executable
+      run: chmod +x android/gradlew
+
+    # Запуск сборки дебажного или релизного APK без подписи
+    - name: Build with Gradle
+      run: ./gradlew assembleDebug
+      working-directory: android
+
+    # Загрузка ВСЕХ готовых APK в артефакты сборки GitHub Actions
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-debug-apks
+        path: android/app/build/outputs/apk/**/*.apk
+        
